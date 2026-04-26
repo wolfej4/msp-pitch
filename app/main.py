@@ -4,13 +4,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import models, schemas
-from .config import settings
+from .config import DATA_DIR, LOGO_EXTS, find_logo_path, settings
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
 from .llm import LLMError, build_system_prompt, stream_chat
@@ -49,7 +49,50 @@ def get_config():
         "llm_provider": settings.LLM_PROVIDER,
         "llm_model": settings.ANTHROPIC_MODEL if settings.LLM_PROVIDER == "anthropic" else settings.OLLAMA_MODEL,
         "smtp_configured": bool(settings.SMTP_HOST and settings.SMTP_FROM),
+        "has_logo": find_logo_path() is not None,
     }
+
+
+# ---------- Logo ----------
+MAX_LOGO_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+@app.get("/api/logo")
+def get_logo():
+    p = find_logo_path()
+    if not p:
+        raise HTTPException(404, "No logo uploaded")
+    return FileResponse(str(p))
+
+
+@app.post("/api/logo")
+async def upload_logo(file: UploadFile = File(...)):
+    name = (file.filename or "").lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in LOGO_EXTS:
+        raise HTTPException(400, f"Unsupported file type. Use: {', '.join(LOGO_EXTS)}")
+    contents = await file.read()
+    if len(contents) > MAX_LOGO_BYTES:
+        raise HTTPException(400, "Logo is too large (max 2 MB)")
+    if not contents:
+        raise HTTPException(400, "Empty file")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # Drop any prior logo with a different extension so only one stays on disk
+    for old_ext in LOGO_EXTS:
+        existing = DATA_DIR / f"logo.{old_ext}"
+        if existing.exists():
+            existing.unlink()
+    target = DATA_DIR / f"logo.{ext}"
+    target.write_bytes(contents)
+    return {"status": "saved"}
+
+
+@app.delete("/api/logo", status_code=204)
+def delete_logo():
+    p = find_logo_path()
+    if p:
+        p.unlink()
+    return Response(status_code=204)
 
 
 # ---------- Prospects ----------

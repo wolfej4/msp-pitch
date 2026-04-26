@@ -76,9 +76,81 @@ async function bootstrap() {
   $("#brandTag").textContent = state.config.company_tagline || "";
   document.title = `${state.config.company_name} — Client Pitch`;
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
+  refreshHeaderLogo(state.config.has_logo);
 
   await loadServices();
   await loadProspects();
+}
+
+function refreshHeaderLogo(hasLogo) {
+  const img = $("#brandLogo");
+  if (hasLogo) {
+    img.src = `/api/logo?t=${Date.now()}`;
+    img.classList.remove("hidden");
+  } else {
+    img.removeAttribute("src");
+    img.classList.add("hidden");
+  }
+}
+
+function logoModal() {
+  const hasLogo = !!state.config.has_logo;
+  const body = document.createElement("div");
+  body.innerHTML = `
+    ${hasLogo ? `<img class="logo-preview" id="logoPreview" src="/api/logo?t=${Date.now()}" alt="">` : `<img class="logo-preview hidden" id="logoPreview" alt="">`}
+    <div class="field">
+      <label>Choose an image (PNG, JPG, SVG, or GIF — max 2 MB)</label>
+      <input type="file" id="logoFile" accept=".png,.jpg,.jpeg,.svg,.gif,image/png,image/jpeg,image/svg+xml,image/gif">
+    </div>
+    <div class="muted" style="font-size:12px;">The logo appears in the app header and on every PDF proposal.</div>
+  `;
+  const fileInput = $("#logoFile", body);
+  const preview = $("#logoPreview", body);
+  fileInput.onchange = () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    preview.src = URL.createObjectURL(f);
+    preview.classList.remove("hidden");
+  };
+
+  const footer = [{ label: "Cancel", onClick: closeModal }];
+  if (hasLogo) {
+    footer.push({
+      label: "Remove",
+      danger: true,
+      onClick: async () => {
+        if (!confirm("Remove the current logo?")) return;
+        const res = await fetch("/api/logo", { method: "DELETE" });
+        if (!res.ok) { toast("Failed to remove logo", true); return; }
+        state.config.has_logo = false;
+        refreshHeaderLogo(false);
+        closeModal();
+        toast("Logo removed");
+      },
+    });
+  }
+  footer.push({
+    label: "Upload",
+    primary: true,
+    onClick: async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) { toast("Pick a file first", true); return; }
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await fetch("/api/logo", { method: "POST", body: fd });
+      if (!res.ok) {
+        const txt = await res.text();
+        toast("Upload failed: " + txt, true);
+        return;
+      }
+      state.config.has_logo = true;
+      refreshHeaderLogo(true);
+      closeModal();
+      toast("Logo updated");
+    },
+  });
+
+  openModal({ title: "Company Logo", body, footer });
 }
 
 // ===== Prospects =====
@@ -585,6 +657,7 @@ $$(".nav-btn").forEach((b) => {
 $("#btnNewProspect").onclick = newProspectModal;
 $("#btnBackToList").onclick = () => { state.activeProspectId = null; showView("prospects"); loadProspects(); };
 $("#btnEditProspect").onclick = editProspectModal;
+$("#btnLogoSettings").onclick = logoModal;
 
 // ===== Utils =====
 function escapeHtml(s) {
