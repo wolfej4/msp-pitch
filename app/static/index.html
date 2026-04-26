@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSP Client Pitch</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-name" id="brandName">MSP Pitch</div>
+    <div class="brand-tag" id="brandTag">Managed IT Services</div>
+  </div>
+  <nav>
+    <button class="nav-btn active" data-view="prospects">Prospects</button>
+    <button class="nav-btn" data-view="catalog">Service Catalog</button>
+    <span class="llm-badge" id="llmBadge"></span>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ===== PROSPECTS LIST VIEW ===== -->
+  <section id="view-prospects" class="view active">
+    <div class="toolbar">
+      <h1>Prospects</h1>
+      <button class="primary" id="btnNewProspect">+ New Prospect</button>
+    </div>
+    <div id="prospectList" class="prospect-list"></div>
+  </section>
+
+  <!-- ===== ACTIVE PROSPECT VIEW ===== -->
+  <section id="view-active" class="view">
+    <div class="toolbar">
+      <button class="link" id="btnBackToList">← All prospects</button>
+      <h1 id="activeProspectName">—</h1>
+      <div class="toolbar-right">
+        <button id="btnEditProspect">Edit Info</button>
+        <button id="btnDownloadPdf" class="primary">Download PDF</button>
+        <button id="btnEmailPdf">Email PDF</button>
+      </div>
+    </div>
+
+    <div class="active-grid">
+      <!-- Chat panel -->
+      <div class="panel chat-panel">
+        <div class="panel-header">
+          <h2>Conversation</h2>
+          <button class="link small" id="btnClearChat">Clear</button>
+        </div>
+        <div id="chatLog" class="chat-log"></div>
+        <form id="chatForm" class="chat-form">
+          <textarea id="chatInput" placeholder="Ask the AI to suggest services, run discovery, or help you decide what to offer..." rows="3"></textarea>
+          <button type="submit" class="primary" id="chatSubmitBtn">Send</button>
+        </form>
+      </div>
+
+      <!-- Right column: catalog + proposal -->
+      <div class="right-column">
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Proposal</h2>
+            <span class="muted" id="proposalCount">0 items</span>
+          </div>
+          <div id="proposalItems" class="proposal-items"></div>
+          <div id="proposalTotals" class="proposal-totals"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Add From Catalog</h2>
+            <input type="text" id="catalogFilter" placeholder="Filter..." class="filter-input">
+          </div>
+          <div id="catalogQuickList" class="catalog-quick"></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== CATALOG VIEW ===== -->
+  <section id="view-catalog" class="view">
+    <div class="toolbar">
+      <h1>Service Catalog</h1>
+      <button class="primary" id="btnNewService">+ New Service</button>
+    </div>
+    <div id="catalogList" class="catalog-list"></div>
+  </section>
+
+</main>
+
+<!-- ===== Modal ===== -->
+<div id="modalBackdrop" class="modal-backdrop hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">Modal</h2>
+      <button class="close" id="modalClose">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

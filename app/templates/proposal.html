@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Proposal — {{ prospect.company_name }}</title>
+<style>
+  @page {
+    size: Letter;
+    margin: 0.75in;
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #888; }
+  }
+  body { font-family: 'Liberation Sans', Helvetica, Arial, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.45; }
+  h1, h2, h3 { color: #0f172a; margin: 0; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2563eb; padding-bottom: 14px; margin-bottom: 28px; }
+  .brand { font-size: 22pt; font-weight: 700; color: #2563eb; line-height: 1.1; }
+  .tagline { color: #64748b; font-size: 10pt; margin-top: 2px; }
+  .meta { text-align: right; font-size: 9.5pt; color: #475569; }
+  .proposal-title { font-size: 18pt; font-weight: 600; margin-bottom: 4px; }
+  .prospect-card { background: #f1f5f9; border-radius: 6px; padding: 14px 18px; margin-bottom: 22px; }
+  .prospect-card .label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+  .prospect-card .value { font-size: 11pt; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
+  .prospect-card .row { display: flex; gap: 36px; margin-top: 6px; flex-wrap: wrap; }
+  section { margin-bottom: 24px; }
+  section h2 { font-size: 13pt; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 10px; }
+  .summary { background: #fefce8; border-left: 3px solid #eab308; padding: 10px 14px; border-radius: 4px; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; background: #f8fafc; padding: 8px 10px; border-bottom: 2px solid #cbd5e1; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
+  td { padding: 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.desc { color: #475569; font-size: 9.5pt; }
+  .category-row td { background: #eff6ff; color: #1e40af; font-weight: 600; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; }
+  .totals { margin-top: 18px; margin-left: auto; width: 55%; }
+  .totals td { padding: 6px 10px; border: none; }
+  .totals tr.divider td { border-top: 2px solid #0f172a; padding-top: 10px; }
+  .totals .label { color: #475569; }
+  .totals .value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .totals .grand { font-size: 12.5pt; color: #2563eb; font-weight: 700; }
+  .footer-note { margin-top: 28px; font-size: 9pt; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+  .empty { color: #94a3b8; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="brand">{{ company.name }}</div>
+    <div class="tagline">{{ company.tagline }}</div>
+  </div>
+  <div class="meta">
+    {% if company.email %}{{ company.email }}<br>{% endif %}
+    {% if company.phone %}{{ company.phone }}<br>{% endif %}
+    {% if company.website %}{{ company.website }}{% endif %}
+  </div>
+</div>
+
+<div class="proposal-title">Services Proposal</div>
+<div style="color:#64748b; margin-bottom: 18px;">Prepared on {{ generated_on }}</div>
+
+<div class="prospect-card">
+  <div class="label">Prepared For</div>
+  <div class="value">{{ prospect.company_name }}</div>
+  <div class="row">
+    {% if prospect.contact_name %}<div><div class="label">Contact</div>{{ prospect.contact_name }}</div>{% endif %}
+    {% if prospect.email %}<div><div class="label">Email</div>{{ prospect.email }}</div>{% endif %}
+    {% if prospect.phone %}<div><div class="label">Phone</div>{{ prospect.phone }}</div>{% endif %}
+    {% if prospect.industry %}<div><div class="label">Industry</div>{{ prospect.industry }}</div>{% endif %}
+    {% if prospect.headcount %}<div><div class="label">Headcount</div>{{ prospect.headcount }}</div>{% endif %}
+  </div>
+</div>
+
+{% if summary_notes %}
+<section>
+  <h2>Discussion Summary</h2>
+  <div class="summary">{{ summary_notes }}</div>
+</section>
+{% endif %}
+
+<section>
+  <h2>Recommended Services</h2>
+  {% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th class="num">Qty</th>
+        <th class="num">Rate</th>
+        <th class="num">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(last_cat=None) %}
+      {% for it in items %}
+        {% set cat = (it.category if it.category is defined and it.category else "Services") %}
+        {% if cat != ns.last_cat %}
+          <tr class="category-row"><td colspan="4">{{ cat }}</td></tr>
+          {% set ns.last_cat = cat %}
+        {% endif %}
+        <tr>
+          <td>
+            <strong>{{ it.name }}</strong>
+            {% if it.description %}<div class="desc">{{ it.description }}</div>{% endif %}
+            {% if it.notes %}<div class="desc"><em>{{ it.notes }}</em></div>{% endif %}
+          </td>
+          <td class="num">{{ "%g"|format(it.quantity) }}</td>
+          <td class="num">{{ it.price_display }}</td>
+          <td class="num">${{ "%.2f"|format(it.line_total) }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="empty">No services have been added to this proposal yet.</p>
+  {% endif %}
+</section>
+
+{% if items %}
+<table class="totals">
+  <tr><td class="label">Recurring (monthly)</td><td class="value">${{ "%.2f"|format(totals.monthly) }}</td></tr>
+  <tr><td class="label">Recurring (annual)</td><td class="value">${{ "%.2f"|format(totals.annual) }}</td></tr>
+  <tr><td class="label">One-time</td><td class="value">${{ "%.2f"|format(totals.one_time) }}</td></tr>
+  <tr class="divider"><td class="label grand">Estimated First-Year Total</td><td class="value grand">${{ "%.2f"|format(annualized_first_year) }}</td></tr>
+</table>
+{% endif %}
+
+<div class="footer-note">
+  This proposal is valid for 30 days from the date above. Pricing is subject to a final scoping call and may be adjusted based on environment specifics. All recurring services are billed in advance; one-time services are billed on completion of work. Hardware and third-party software licensing are billed at cost plus a standard procurement margin.
+</div>
+
+</body>
+</html>
