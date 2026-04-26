@@ -1,14 +1,16 @@
 """Generate a PDF proposal from a prospect + their proposal items + chat summary."""
 
+import base64
+import mimetypes
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 
-from .config import settings
+from .config import find_logo_path, settings
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(
@@ -27,6 +29,17 @@ def _format_price(price: float, unit: str, cycle: str) -> str:
 
 def _line_total(item: Dict) -> float:
     return float(item["quantity"]) * float(item["price"])
+
+
+def _logo_data_uri() -> Optional[str]:
+    """Embed the logo as a data: URI so WeasyPrint renders it without filesystem access."""
+    p = find_logo_path()
+    if not p:
+        return None
+    mime, _ = mimetypes.guess_type(str(p))
+    if not mime:
+        mime = "image/png"
+    return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
 
 
 def _grouped_totals(items: List[Dict]) -> Dict[str, float]:
@@ -56,6 +69,7 @@ def render_proposal_pdf(
             "email": settings.COMPANY_EMAIL,
             "phone": settings.COMPANY_PHONE,
             "website": settings.COMPANY_WEBSITE,
+            "logo": _logo_data_uri(),
         },
         prospect=prospect,
         items=[

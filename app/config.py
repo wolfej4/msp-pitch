@@ -1,4 +1,17 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DATA_DIR = Path("/app/data")
+LOGO_EXTS = ("png", "jpg", "jpeg", "svg", "gif")
+
+
+def find_logo_path() -> Path | None:
+    for ext in LOGO_EXTS:
+        p = DATA_DIR / f"logo.{ext}"
+        if p.exists():
+            return p
+    return None
 
 
 class Settings(BaseSettings):
