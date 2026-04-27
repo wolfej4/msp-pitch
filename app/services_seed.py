@@ -2,6 +2,33 @@
 Edit/delete these freely from the UI — they're a starting point, not a mandate.
 Pricing is illustrative; adjust to your market (Crestview FL / NW Florida SMB)."""
 
+DEFAULT_CATEGORIES = [
+    "Foundation",
+    "Cybersecurity",
+    "Identity & Access",
+    "Cloud & Productivity",
+    "Backup & DR",
+    "Data Protection",
+    "Network",
+    "Mobile Device Management",
+    "Monitoring & Observability",
+    "Communications",
+    "Print & Document Management",
+    "Hardware as a Service",
+    "Procurement",
+    "Project Services",
+    "Strategic",
+    "Compliance & Risk",
+    "Training & Awareness",
+    "Industry: Hospitality",
+    "Industry: Healthcare",
+    "Industry: Legal",
+    "Industry: Financial Services",
+    "Industry: Nonprofit",
+    "Industry: Manufacturing",
+    "General",
+]
+
 DEFAULT_SERVICES = [
     # ---- Foundation / Managed IT ----
     {

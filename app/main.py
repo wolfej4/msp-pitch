@@ -15,7 +15,7 @@ from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
 from .llm import LLMError, build_system_prompt, stream_chat
 from .pdf_generator import render_proposal_pdf
-from .services_seed import DEFAULT_SERVICES
+from .services_seed import DEFAULT_CATEGORIES, DEFAULT_SERVICES
 
 # ---------- Init ----------
 Base.metadata.create_all(bind=engine)
@@ -32,23 +32,27 @@ def _seed_services_if_empty():
         db.close()
 
 
-def _seed_categories_if_empty():
-    """Populate categories from any names already present on services."""
+def _ensure_default_categories():
+    """Add any missing default + service-derived categories. Idempotent: safe to
+    run on every startup so existing installs pick up new defaults."""
     db: Session = next(get_db())
     try:
-        if db.query(models.Category).count() > 0:
-            return
-        names = {row[0] for row in db.query(models.Service.category).all() if row[0]}
-        names.add("General")
-        for name in sorted(names):
+        existing = {c.name for c in db.query(models.Category).all()}
+        wanted = set(DEFAULT_CATEGORIES)
+        wanted.update(row[0] for row in db.query(models.Service.category).all() if row[0])
+        wanted.add("General")
+        added = False
+        for name in sorted(wanted - existing):
             db.add(models.Category(name=name))
-        db.commit()
+            added = True
+        if added:
+            db.commit()
     finally:
         db.close()
 
 
 _seed_services_if_empty()
-_seed_categories_if_empty()
+_ensure_default_categories()
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 
