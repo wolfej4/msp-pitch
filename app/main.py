@@ -32,7 +32,23 @@ def _seed_services_if_empty():
         db.close()
 
 
+def _seed_categories_if_empty():
+    """Populate categories from any names already present on services."""
+    db: Session = next(get_db())
+    try:
+        if db.query(models.Category).count() > 0:
+            return
+        names = {row[0] for row in db.query(models.Service.category).all() if row[0]}
+        names.add("General")
+        for name in sorted(names):
+            db.add(models.Category(name=name))
+        db.commit()
+    finally:
+        db.close()
+
+
 _seed_services_if_empty()
+_seed_categories_if_empty()
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 
@@ -174,6 +190,60 @@ def delete_service(service_id: int, db: Session = Depends(get_db)):
     if not s:
         raise HTTPException(404, "Service not found")
     db.delete(s)
+    db.commit()
+    return Response(status_code=204)
+
+
+# ---------- Categories ----------
+@app.get("/api/categories", response_model=List[schemas.CategoryOut])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(models.Category).order_by(models.Category.name).all()
+
+
+@app.post("/api/categories", response_model=schemas.CategoryOut)
+def create_category(payload: schemas.CategoryCreate, db: Session = Depends(get_db)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if db.query(models.Category).filter_by(name=name).first():
+        raise HTTPException(409, "A category with that name already exists")
+    cat = models.Category(name=name)
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@app.patch("/api/categories/{cat_id}", response_model=schemas.CategoryOut)
+def update_category(cat_id: int, payload: schemas.CategoryUpdate, db: Session = Depends(get_db)):
+    cat = db.get(models.Category, cat_id)
+    if not cat:
+        raise HTTPException(404, "Category not found")
+    new_name = payload.name.strip()
+    if not new_name:
+        raise HTTPException(400, "Name is required")
+    if new_name != cat.name and db.query(models.Category).filter_by(name=new_name).first():
+        raise HTTPException(409, "A category with that name already exists")
+    old_name = cat.name
+    cat.name = new_name
+    if old_name != new_name:
+        db.query(models.Service).filter_by(category=old_name).update({"category": new_name})
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@app.delete("/api/categories/{cat_id}", status_code=204)
+def delete_category(cat_id: int, db: Session = Depends(get_db)):
+    cat = db.get(models.Category, cat_id)
+    if not cat:
+        raise HTTPException(404, "Category not found")
+    # Reassign any services in this category to "General" so they're not orphaned.
+    db.query(models.Service).filter_by(category=cat.name).update({"category": "General"})
+    is_general = cat.name == "General"
+    db.delete(cat)
+    if is_general or not db.query(models.Category).filter_by(name="General").first():
+        db.add(models.Category(name="General"))
     db.commit()
     return Response(status_code=204)
 

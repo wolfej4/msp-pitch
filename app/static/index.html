@@ -77,6 +77,7 @@
           <div class="panel-header">
             <h2>Add From Catalog</h2>
             <input type="text" id="catalogFilter" placeholder="Filter..." class="filter-input">
+            <select id="catalogQuickCategory" class="filter-input"></select>
           </div>
           <div id="catalogQuickList" class="catalog-quick"></div>
         </div>
@@ -89,7 +90,12 @@
   <section id="view-catalog" class="view">
     <div class="toolbar">
       <h1>Service Catalog</h1>
-      <button class="primary" id="btnNewService">+ New Service</button>
+      <input type="text" id="catalogTextFilter" placeholder="Filter services..." class="filter-input wide">
+      <select id="catalogCategoryFilter" class="filter-input wide"></select>
+      <div class="toolbar-right">
+        <button id="btnManageCategories">Manage Categories</button>
+        <button class="primary" id="btnNewService">+ New Service</button>
+      </div>
     </div>
     <div id="catalogList" class="catalog-list"></div>
   </section>
