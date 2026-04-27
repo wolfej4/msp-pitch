@@ -1,6 +1,7 @@
 """Generate a PDF proposal from a prospect + their proposal items + chat summary."""
 
 import base64
+import logging
 import mimetypes
 from datetime import datetime
 from io import BytesIO
@@ -11,6 +12,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 
 from .config import find_logo_path, settings
+
+log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(
@@ -32,14 +35,19 @@ def _line_total(item: Dict) -> float:
 
 
 def _logo_data_uri() -> Optional[str]:
-    """Embed the logo as a data: URI so WeasyPrint renders it without filesystem access."""
-    p = find_logo_path()
-    if not p:
+    """Embed the logo as a data: URI so WeasyPrint renders it without filesystem access.
+    Returns None on any failure so a bad logo file can never break PDF rendering."""
+    try:
+        p = find_logo_path()
+        if not p:
+            return None
+        mime, _ = mimetypes.guess_type(str(p))
+        if not mime:
+            mime = "image/png"
+        return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
+    except Exception:
+        log.exception("Failed to embed logo, continuing without it")
         return None
-    mime, _ = mimetypes.guess_type(str(p))
-    if not mime:
-        mime = "image/png"
-    return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
 
 
 def _grouped_totals(items: List[Dict]) -> Dict[str, float]:

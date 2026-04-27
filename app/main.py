@@ -1,5 +1,7 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
+import logging
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -53,6 +55,9 @@ def _ensure_default_categories():
 
 _seed_services_if_empty()
 _ensure_default_categories()
+
+log = logging.getLogger("msp_pitch")
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 
@@ -417,21 +422,21 @@ def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = "
         cat = "Services"
         if it.service_id:
             svc = db.get(models.Service, it.service_id)
-            if svc:
+            if svc and svc.category:
                 cat = svc.category
         enriched.append({
-            "name": it.name,
-            "description": it.description,
-            "quantity": it.quantity,
-            "price": it.price,
-            "price_unit": it.price_unit,
-            "billing_cycle": it.billing_cycle,
-            "notes": it.notes,
-            "category": cat,
+            "name": it.name or "",
+            "description": it.description or "",
+            "quantity": it.quantity if it.quantity is not None else 0,
+            "price": it.price if it.price is not None else 0,
+            "price_unit": it.price_unit or "flat",
+            "billing_cycle": it.billing_cycle or "monthly",
+            "notes": it.notes or "",
+            "category": cat or "Services",
         })
 
     # Sort by category for nicer grouping
-    enriched.sort(key=lambda x: (x["category"], x["name"]))
+    enriched.sort(key=lambda x: (x["category"] or "", x["name"] or ""))
 
     prospect_dict = {
         "company_name": prospect.company_name,
@@ -444,10 +449,19 @@ def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = "
     return prospect_dict, enriched, summary_notes or (prospect.notes or "")
 
 
+def _build_pdf_or_500(prospect, items, notes) -> bytes:
+    """Render the PDF and surface the real error if WeasyPrint blows up."""
+    try:
+        return render_proposal_pdf(prospect, items, notes)
+    except Exception as e:
+        log.exception("PDF rendering failed")
+        raise HTTPException(500, f"PDF rendering failed: {e.__class__.__name__}: {e}\n\n{traceback.format_exc()}")
+
+
 @app.get("/api/prospects/{prospect_id}/proposal.pdf")
 def download_proposal(prospect_id: int, db: Session = Depends(get_db)):
     prospect, items, notes = _load_proposal_payload(prospect_id, db)
-    pdf_bytes = render_proposal_pdf(prospect, items, notes)
+    pdf_bytes = _build_pdf_or_500(prospect, items, notes)
     safe = "".join(c for c in prospect["company_name"] if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
     filename = f"{safe or 'proposal'}_proposal.pdf"
     return Response(
@@ -461,7 +475,7 @@ def download_proposal(prospect_id: int, db: Session = Depends(get_db)):
 @app.post("/api/prospects/{prospect_id}/email")
 async def email_proposal(prospect_id: int, payload: schemas.EmailRequest, db: Session = Depends(get_db)):
     prospect, items, notes = _load_proposal_payload(prospect_id, db)
-    pdf_bytes = render_proposal_pdf(prospect, items, notes)
+    pdf_bytes = _build_pdf_or_500(prospect, items, notes)
 
     subject = payload.subject or f"Proposal from {settings.COMPANY_NAME} for {prospect['company_name']}"
     body = payload.body or (
