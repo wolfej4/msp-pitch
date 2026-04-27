@@ -3,6 +3,9 @@ const state = {
   config: null,
   prospects: [],
   services: [],
+  categories: [],
+  catalogFilter: { text: "", category: "" },
+  quickFilter: { text: "", category: "" },
   activeProspectId: null,
   activeProspect: null,
   proposalItems: [],
@@ -78,8 +81,33 @@ async function bootstrap() {
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
   refreshHeaderLogo(state.config.has_logo);
 
+  await loadCategories();
   await loadServices();
   await loadProspects();
+}
+
+// ===== Categories =====
+async function loadCategories() {
+  state.categories = await api("/api/categories");
+}
+
+function categoryNames() {
+  return state.categories.map((c) => c.name);
+}
+
+function buildCategoryOptions(selected, { includeBlank = false, blankLabel = "All categories" } = {}) {
+  const opts = [];
+  if (includeBlank) opts.push(`<option value="">${escapeHtml(blankLabel)}</option>`);
+  // Show known categories from the table
+  const names = new Set(categoryNames());
+  // Plus any orphan category strings already on services so the user can still see/select them
+  for (const s of state.services) if (s.category) names.add(s.category);
+  const sorted = Array.from(names).sort((a, b) => a.localeCompare(b));
+  for (const name of sorted) {
+    const sel = name === selected ? " selected" : "";
+    opts.push(`<option value="${escapeAttr(name)}"${sel}>${escapeHtml(name)}</option>`);
+  }
+  return opts.join("");
 }
 
 function refreshHeaderLogo(hasLogo) {
@@ -405,13 +433,39 @@ async function loadServices() {
 }
 
 function renderCatalog() {
+  // Refresh the category filter dropdown so it always reflects current categories.
+  const catSel = $("#catalogCategoryFilter");
+  if (catSel) {
+    catSel.innerHTML = buildCategoryOptions(state.catalogFilter.category, {
+      includeBlank: true,
+    });
+  }
+
   const list = $("#catalogList");
   list.innerHTML = "";
   if (state.services.length === 0) {
     list.innerHTML = '<div class="empty-state">No services yet.</div>';
     return;
   }
-  for (const s of state.services) {
+
+  const text = state.catalogFilter.text.toLowerCase();
+  const cat = state.catalogFilter.category;
+  const filtered = state.services.filter((s) => {
+    if (cat && s.category !== cat) return false;
+    if (!text) return true;
+    return (
+      s.name.toLowerCase().includes(text) ||
+      (s.category || "").toLowerCase().includes(text) ||
+      (s.description || "").toLowerCase().includes(text)
+    );
+  });
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty-state">No services match your filters.</div>';
+    return;
+  }
+
+  for (const s of filtered) {
     const card = document.createElement("div");
     card.className = "catalog-card";
     card.innerHTML = `
@@ -439,13 +493,23 @@ function renderCatalog() {
   }
 }
 
-function renderCatalogQuick(filter = "") {
+function renderCatalogQuick() {
+  const catSel = $("#catalogQuickCategory");
+  if (catSel) {
+    catSel.innerHTML = buildCategoryOptions(state.quickFilter.category, {
+      includeBlank: true,
+    });
+  }
+
   const wrap = $("#catalogQuickList");
   wrap.innerHTML = "";
-  const f = filter.toLowerCase();
-  const filtered = state.services.filter(
-    (s) => !f || s.name.toLowerCase().includes(f) || s.category.toLowerCase().includes(f)
-  );
+  const text = state.quickFilter.text.toLowerCase();
+  const cat = state.quickFilter.category;
+  const filtered = state.services.filter((s) => {
+    if (cat && s.category !== cat) return false;
+    if (!text) return true;
+    return s.name.toLowerCase().includes(text) || (s.category || "").toLowerCase().includes(text);
+  });
   if (filtered.length === 0) {
     wrap.innerHTML = '<div class="empty-state" style="padding:20px;">No matching services.</div>';
     return;
@@ -465,7 +529,22 @@ function renderCatalogQuick(filter = "") {
   }
 }
 
-$("#catalogFilter").addEventListener("input", (e) => renderCatalogQuick(e.target.value));
+$("#catalogFilter").addEventListener("input", (e) => {
+  state.quickFilter.text = e.target.value;
+  renderCatalogQuick();
+});
+$("#catalogQuickCategory").addEventListener("change", (e) => {
+  state.quickFilter.category = e.target.value;
+  renderCatalogQuick();
+});
+$("#catalogTextFilter").addEventListener("input", (e) => {
+  state.catalogFilter.text = e.target.value;
+  renderCatalog();
+});
+$("#catalogCategoryFilter").addEventListener("change", (e) => {
+  state.catalogFilter.category = e.target.value;
+  renderCatalog();
+});
 
 function serviceModal(svc = null) {
   const isNew = !svc;
@@ -474,7 +553,10 @@ function serviceModal(svc = null) {
   form.innerHTML = `
     <div class="field-row">
       <div class="field"><label>Name *</label><input type="text" id="s_name" value="${escapeAttr(s.name)}"></div>
-      <div class="field"><label>Category</label><input type="text" id="s_cat" value="${escapeAttr(s.category)}"></div>
+      <div class="field">
+        <label>Category</label>
+        <select id="s_cat">${buildCategoryOptions(s.category)}</select>
+      </div>
     </div>
     <div class="field"><label>Description</label><textarea id="s_desc" rows="3">${escapeHtml(s.description)}</textarea></div>
     <div class="field-row">
@@ -518,7 +600,7 @@ function serviceModal(svc = null) {
           else await api(`/api/services/${svc.id}`, { method: "PATCH", body: JSON.stringify(data) });
           closeModal();
           await loadServices();
-          if (state.activeProspectId) renderCatalogQuick($("#catalogFilter").value);
+          if (state.activeProspectId) renderCatalogQuick();
           toast(isNew ? "Service added" : "Service saved");
         },
       },
@@ -527,6 +609,94 @@ function serviceModal(svc = null) {
 }
 
 $("#btnNewService").onclick = () => serviceModal(null);
+
+// ===== Manage Categories =====
+function manageCategoriesModal() {
+  const body = document.createElement("div");
+
+  const render = () => {
+    const counts = {};
+    for (const s of state.services) counts[s.category] = (counts[s.category] || 0) + 1;
+    const rows = state.categories
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(
+        (c) => `
+        <div class="cat-row" data-id="${c.id}">
+          <input type="text" class="cat-name" value="${escapeAttr(c.name)}">
+          <span class="cat-count muted">${counts[c.name] || 0} service${counts[c.name] === 1 ? "" : "s"}</span>
+          <button class="small" data-action="rename">Save</button>
+          <button class="small danger" data-action="delete">Delete</button>
+        </div>`
+      )
+      .join("");
+    body.innerHTML = `
+      <div class="cat-list">${rows || '<div class="muted" style="padding:8px;">No categories yet.</div>'}</div>
+      <div class="field" style="margin-top:14px; display:flex; gap:8px; align-items:flex-end;">
+        <div style="flex:1;"><label>Add category</label><input type="text" id="newCatName" placeholder="e.g. Compliance"></div>
+        <button class="primary small" id="btnAddCat">Add</button>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:6px;">
+        Renaming a category renames it on every service that uses it. Deleting a category reassigns its services to "General".
+      </div>
+    `;
+
+    $("#btnAddCat", body).onclick = async () => {
+      const name = $("#newCatName", body).value.trim();
+      if (!name) { toast("Name is required", true); return; }
+      try {
+        await api("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
+        await loadCategories();
+        render();
+        toast("Category added");
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+
+    $$(".cat-row", body).forEach((row) => {
+      const id = row.dataset.id;
+      const input = $(".cat-name", row);
+      $('[data-action="rename"]', row).onclick = async () => {
+        const name = input.value.trim();
+        if (!name) { toast("Name is required", true); return; }
+        try {
+          await api(`/api/categories/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+          await Promise.all([loadCategories(), loadServices()]);
+          render();
+          if (state.activeProspectId) renderCatalogQuick();
+          toast("Category renamed");
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+      $('[data-action="delete"]', row).onclick = async () => {
+        const cat = state.categories.find((c) => String(c.id) === String(id));
+        if (!cat) return;
+        const used = (counts[cat.name] || 0);
+        const msg = used
+          ? `Delete "${cat.name}"? ${used} service${used === 1 ? "" : "s"} will be reassigned to "General".`
+          : `Delete "${cat.name}"?`;
+        if (!confirm(msg)) return;
+        await api(`/api/categories/${id}`, { method: "DELETE" });
+        await Promise.all([loadCategories(), loadServices()]);
+        render();
+        if (state.activeProspectId) renderCatalogQuick();
+        toast("Category deleted");
+      };
+    });
+  };
+
+  render();
+
+  openModal({
+    title: "Manage Categories",
+    body,
+    footer: [{ label: "Done", primary: true, onClick: closeModal }],
+  });
+}
+
+$("#btnManageCategories").onclick = manageCategoriesModal;
 
 // ===== Proposal items =====
 async function loadProposalItems() {

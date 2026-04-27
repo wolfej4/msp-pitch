@@ -51,6 +51,15 @@ class Service(Base):
     is_active = Column(Integer, default=1)
 
 
+class Category(Base):
+    """User-managed list of service categories. Service.category stores the name as a string."""
+
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+
+
 class ProposalItem(Base):
     """A line item attached to a specific prospect's proposal."""
 
