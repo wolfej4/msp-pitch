@@ -1,11 +1,12 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -562,9 +563,22 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+def _render_index() -> str:
+    """index.html with a content hash on the JS/CSS URLs, so any change to them is a new URL
+    and browsers can never pair a fresh page with a stale cached app.js."""
+    html = (STATIC_DIR / "index.html").read_text()
+    for name in ("app.js", "styles.css"):
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:12]
+        html = html.replace(f"/static/{name}\"", f"/static/{name}?v={digest}\"")
+    return html
+
+
+INDEX_HTML = _render_index()
+
+
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return HTMLResponse(INDEX_HTML)
 
 
 @app.get("/healthz")
