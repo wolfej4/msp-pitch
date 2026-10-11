@@ -83,10 +83,17 @@ async function bootstrap() {
 
 async function loadConfig() {
   state.config = await api("/api/config");
-  $("#brandName").textContent = state.config.company_name;
+  $("#brandName").innerHTML = brandWordmark(state.config.company_name);
   document.title = `${state.config.company_name} Pitch`;
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
   refreshHeaderLogo(state.config.has_logo);
+}
+
+// "SwyfTech" -> "Swyf" + gradient "Tech", like the website's header.
+function brandWordmark(name) {
+  const i = name.lastIndexOf("Tech");
+  if (i <= 0) return escapeHtml(name);
+  return `${escapeHtml(name.slice(0, i))}<span class="brand-accent">Tech</span>${escapeHtml(name.slice(i + 4))}`;
 }
 
 // ===== Categories =====
@@ -858,8 +865,37 @@ function renderSettings() {
     hint.textContent = `Overrides environment value: ${env === "" ? "(blank)" : env}`;
   }
   setSecretStatus($("#anthropicKeyStatus"), secrets.anthropic_api_key_set, "ANTHROPIC_API_KEY");
-  setSecretStatus($("#smtpPassStatus"), secrets.smtp_pass_set, "SMTP_PASS");
+  renderSmtpPassStatus(secrets.smtp_pass_source);
   syncProviderFields();
+}
+
+function renderSmtpPassStatus(source) {
+  const input = $("#smtpPass");
+  input.value = "";
+  if (source === "app") {
+    input.placeholder = "•••••••• (saved, type to replace)";
+    $("#smtpPassStatus").textContent = "Saved in the app.";
+  } else if (source === "env") {
+    input.placeholder = "Set via SMTP_PASS, type to override";
+    $("#smtpPassStatus").innerHTML = "Using the <code>SMTP_PASS</code> environment variable.";
+  } else {
+    input.placeholder = "";
+    $("#smtpPassStatus").textContent = "Not set.";
+  }
+  $("#btnClearSmtpPass").hidden = source !== "app";
+}
+
+async function clearSmtpPass() {
+  if (!confirm("Remove the SMTP password saved in the app?")) return;
+  try {
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ smtp_pass: "" }) });
+  } catch (e) {
+    setSettingsStatus("Not saved — " + describeApiError(e), "error");
+    return;
+  }
+  renderSettings();
+  await loadConfig();
+  setSettingsStatus("✓ Saved password removed", "ok");
 }
 
 function setSecretStatus(el, isSet, envName) {
@@ -912,6 +948,9 @@ async function saveSettings() {
   for (const [key, value] of Object.entries(form)) {
     if (value !== state.settings.values[key]) changed[key] = value;
   }
+  // Passwords are never sent back to the page, so a typed one is always a change. Not trimmed.
+  const smtpPass = $("#smtpPass").value;
+  if (smtpPass) changed.smtp_pass = smtpPass;
   if (Object.keys(changed).length === 0) { setSettingsStatus("No changes to save."); return; }
 
   const problems = [];
@@ -939,7 +978,7 @@ async function saveSettings() {
 }
 
 async function resetSettings() {
-  if (!confirm("Discard all settings saved here and go back to the environment variable values?")) return;
+  if (!confirm("Discard all settings saved here (including a saved SMTP password) and go back to the environment variable values?")) return;
   state.settings = await api("/api/settings", { method: "DELETE" });
   renderSettings();
   setSettingsStatus("");
@@ -990,6 +1029,7 @@ $('#view-settings [data-key="llm_provider"]').addEventListener("change", () => {
   $("#llmTestResult").textContent = "";
 });
 $("#btnSaveSettings").onclick = saveSettings;
+$("#btnClearSmtpPass").onclick = clearSmtpPass;
 $("#btnResetSettings").onclick = resetSettings;
 $("#btnTestLlm").onclick = testLlm;
 
