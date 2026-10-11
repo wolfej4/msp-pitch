@@ -77,3 +77,13 @@ class ProposalItem(Base):
     notes = Column(Text, default="")
 
     prospect = relationship("Prospect", back_populates="items")
+
+
+class AppSetting(Base):
+    """A setting changed from the in-app Settings screen. Overrides the env var of the same name.
+    Values are stored JSON-encoded so ints/bools round-trip."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)

@@ -6,6 +6,8 @@ pydantic-settings==2.6.1
 anthropic==0.39.0
 httpx==0.27.2
 weasyprint==62.3
+# weasyprint 62.x breaks with pydyf >= 0.11 (PDF export 500s)
+pydyf==0.10.0
 jinja2==3.1.4
 python-multipart==0.0.12
 aiosmtplib==3.0.2

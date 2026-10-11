@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Prospect ----------
@@ -131,3 +131,27 @@ class EmailRequest(BaseModel):
     to: str
     subject: Optional[str] = None
     body: Optional[str] = None
+
+
+# ---------- App settings ----------
+class AppSettingsUpdate(BaseModel):
+    company_name: Optional[str] = Field(None, min_length=1)
+    company_tagline: Optional[str] = None
+    company_email: Optional[str] = None
+    company_phone: Optional[str] = None
+    company_website: Optional[str] = None
+    llm_provider: Optional[Literal["ollama", "anthropic"]] = None
+    anthropic_model: Optional[str] = Field(None, min_length=1)
+    ollama_base_url: Optional[str] = Field(None, pattern=r"^https?://\S+$")
+    ollama_model: Optional[str] = Field(None, min_length=1)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = Field(None, ge=1, le=65535)
+    smtp_user: Optional[str] = None
+    smtp_from: Optional[str] = None
+    smtp_tls: Optional[bool] = None
+
+
+class LLMTestRequest(BaseModel):
+    provider: Literal["ollama", "anthropic"]
+    ollama_base_url: str = ""
+    model: str = ""

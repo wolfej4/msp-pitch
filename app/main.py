@@ -10,11 +10,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import models, schemas
-from .config import DATA_DIR, LOGO_EXTS, find_logo_path, settings
+from .config import DATA_DIR, LOGO_EXTS, find_logo_path
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
-from .llm import LLMError, build_system_prompt, stream_chat
+from .llm import LLMError, build_system_prompt, list_anthropic_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
+from .runtime_settings import EDITABLE_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
 
 # ---------- Init ----------
@@ -56,6 +57,7 @@ app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 # ---------- Config ----------
 @app.get("/api/config")
 def get_config():
+    settings = get_settings()
     return {
         "company_name": settings.COMPANY_NAME,
         "company_tagline": settings.COMPANY_TAGLINE,
@@ -67,6 +69,65 @@ def get_config():
         "smtp_configured": bool(settings.SMTP_HOST and settings.SMTP_FROM),
         "has_logo": find_logo_path() is not None,
     }
+
+
+# ---------- Settings (editable in the UI) ----------
+def _settings_payload():
+    effective = get_settings()
+    return {
+        "values": {k.lower(): getattr(effective, k) for k in EDITABLE_KEYS},
+        "env_defaults": {k.lower(): v for k, v in env_defaults().items()},
+        "overridden": sorted(k.lower() for k in load_overrides()),
+        # Secrets stay in env vars; only report whether they're present.
+        "secrets": {
+            "anthropic_api_key_set": bool(effective.ANTHROPIC_API_KEY),
+            "smtp_pass_set": bool(effective.SMTP_PASS),
+        },
+    }
+
+
+@app.get("/api/settings")
+def get_app_settings():
+    return _settings_payload()
+
+
+@app.put("/api/settings")
+def update_app_settings(payload: schemas.AppSettingsUpdate):
+    values = {k.upper(): v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    for k in ("COMPANY_NAME", "COMPANY_TAGLINE", "COMPANY_EMAIL", "COMPANY_PHONE", "COMPANY_WEBSITE",
+              "ANTHROPIC_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
+        if k in values:
+            values[k] = values[k].strip()
+    save_settings(values)
+    return _settings_payload()
+
+
+@app.delete("/api/settings")
+def reset_app_settings():
+    reset_settings()
+    return _settings_payload()
+
+
+@app.post("/api/settings/test-llm")
+async def test_llm(payload: schemas.LLMTestRequest):
+    """List the models the provider offers, using the (possibly unsaved) form values."""
+    try:
+        if payload.provider == "ollama":
+            base_url = payload.ollama_base_url.strip() or get_settings().OLLAMA_BASE_URL
+            if not base_url.startswith(("http://", "https://")):
+                raise HTTPException(400, "Ollama URL must start with http:// or https://")
+            models = await list_ollama_models(base_url)
+        else:
+            models = await list_anthropic_models(get_settings().ANTHROPIC_API_KEY)
+    except LLMError as e:
+        return {"ok": False, "error": str(e), "models": []}
+    model = payload.model.strip()
+    found = None
+    if model:
+        # Ollama treats a bare name as ":latest"
+        candidates = {model, f"{model}:latest"} if payload.provider == "ollama" else {model}
+        found = any(m in candidates for m in models)
+    return {"ok": True, "models": models, "model_found": found}
 
 
 # ---------- Logo ----------
@@ -352,6 +413,7 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
         .all()
     )
 
+    cfg = get_settings()
     system_prompt = build_system_prompt(
         prospect={
             "company_name": prospect.company_name,
@@ -371,7 +433,7 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             }
             for s in services
         ],
-        company={"name": settings.COMPANY_NAME, "tagline": settings.COMPANY_TAGLINE},
+        company={"name": cfg.COMPANY_NAME, "tagline": cfg.COMPANY_TAGLINE},
     )
 
     chat_messages = [{"role": m.role, "content": m.content} for m in history if m.role in ("user", "assistant")]
@@ -458,6 +520,7 @@ def download_proposal(prospect_id: int, db: Session = Depends(get_db)):
 async def email_proposal(prospect_id: int, payload: schemas.EmailRequest, db: Session = Depends(get_db)):
     prospect, items, notes = _load_proposal_payload(prospect_id, db)
     pdf_bytes = render_proposal_pdf(prospect, items, notes)
+    settings = get_settings()
 
     subject = payload.subject or f"Proposal from {settings.COMPANY_NAME} for {prospect['company_name']}"
     body = payload.body or (
