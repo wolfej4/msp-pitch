@@ -1,7 +1,7 @@
 """Settings editable from the UI, layered over the env-driven defaults in config.py.
 
-ANTHROPIC_API_KEY is deliberately not editable here; it only comes from the environment.
-SMTP_PASS can be saved here, but is write-only: it's never returned to the browser."""
+Secrets (SMTP_PASS and the API keys) can be saved here too, but are write-only: they're
+never returned to the browser."""
 
 import json
 from typing import Dict
@@ -18,6 +18,7 @@ EDITABLE_KEYS = (
     "COMPANY_WEBSITE",
     "LLM_PROVIDER",
     "ANTHROPIC_MODEL",
+    "GEMINI_MODEL",
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
     "SMTP_HOST",
@@ -28,7 +29,7 @@ EDITABLE_KEYS = (
 )
 
 # Write-only: can be saved from the UI but never sent back to it.
-SECRET_KEYS = ("SMTP_PASS",)
+SECRET_KEYS = ("SMTP_PASS", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")
 
 
 def env_defaults() -> Dict:

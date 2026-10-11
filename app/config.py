@@ -32,9 +32,11 @@ class Settings(BaseSettings):
     COMPANY_WEBSITE: str = ""
 
     # LLM
-    LLM_PROVIDER: str = "ollama"  # "anthropic" or "ollama"
+    LLM_PROVIDER: str = "ollama"  # "ollama", "anthropic" or "gemini"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
 

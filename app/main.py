@@ -1,6 +1,7 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -8,13 +9,14 @@ from typing import List
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from . import models, schemas
 from .config import DATA_DIR, LOGO_EXTS, find_logo_path, normalize_url
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
-from .llm import LLMError, build_system_prompt, list_anthropic_models, list_ollama_models, stream_chat
+from .llm import LLMError, build_system_prompt, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
 from .runtime_settings import EDITABLE_KEYS, SECRET_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
@@ -49,8 +51,41 @@ def _seed_categories_if_empty():
         db.close()
 
 
+def _migrate_prospect_counts():
+    """Older databases have one free-text "headcount" field ("15 users, 25 endpoints").
+    Add the users/endpoints columns and split what can be parsed into them; anything
+    unparseable is kept by appending it to the prospect's notes."""
+    cols = {c["name"] for c in inspect(engine).get_columns("prospects")}
+    with engine.begin() as conn:
+        for col in ("users", "endpoints"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE prospects ADD COLUMN {col} INTEGER")
+
+    db: Session = next(get_db())
+    try:
+        legacy = db.query(models.Prospect).filter(models.Prospect.headcount != "", models.Prospect.headcount.isnot(None))
+        for p in legacy:
+            text = p.headcount.strip()
+            users = re.search(r"(\d+)\s*(?:users?|people|employees|staff|seats?)\b", text, re.I)
+            endpoints = re.search(r"(\d+)\s*(?:endpoints?|devices?|computers?|machines?|pcs?|workstations?)\b", text, re.I)
+            if users and p.users is None:
+                p.users = int(users.group(1))
+            if endpoints and p.endpoints is None:
+                p.endpoints = int(endpoints.group(1))
+            if not users and not endpoints:
+                if re.fullmatch(r"\d+", text) and p.users is None:
+                    p.users = int(text)  # a bare headcount number is people
+                else:
+                    p.notes = f"{p.notes}\n\nHeadcount: {text}".strip()
+            p.headcount = ""
+        db.commit()
+    finally:
+        db.close()
+
+
 _seed_services_if_empty()
 _seed_categories_if_empty()
+_migrate_prospect_counts()
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 
@@ -76,7 +111,10 @@ def get_config():
         "company_phone": settings.COMPANY_PHONE,
         "company_website": settings.COMPANY_WEBSITE,
         "llm_provider": settings.LLM_PROVIDER,
-        "llm_model": settings.ANTHROPIC_MODEL if settings.LLM_PROVIDER == "anthropic" else settings.OLLAMA_MODEL,
+        "llm_model": {
+            "anthropic": settings.ANTHROPIC_MODEL,
+            "gemini": settings.GEMINI_MODEL,
+        }.get(settings.LLM_PROVIDER, settings.OLLAMA_MODEL),
         "smtp_configured": bool(settings.SMTP_HOST and settings.SMTP_FROM),
         "has_logo": find_logo_path() is not None,
     }
@@ -90,10 +128,10 @@ def _settings_payload():
         "values": {k.lower(): getattr(effective, k) for k in EDITABLE_KEYS},
         "env_defaults": {k.lower(): v for k, v in env_defaults().items()},
         "overridden": sorted(k.lower() for k in overrides if k not in SECRET_KEYS),
-        # Secrets are never returned; only whether each is set, and where from.
-        "secrets": {
-            "anthropic_api_key_set": bool(effective.ANTHROPIC_API_KEY),
-            "smtp_pass_source": "app" if "SMTP_PASS" in overrides else ("env" if effective.SMTP_PASS else None),
+        # Secrets are never returned; only where each one comes from: "app", "env" or None.
+        "secret_sources": {
+            k.lower(): "app" if k in overrides else ("env" if getattr(effective, k) else None)
+            for k in SECRET_KEYS
         },
     }
 
@@ -107,7 +145,11 @@ def get_app_settings():
 def update_app_settings(payload: schemas.AppSettingsUpdate):
     values = {k.upper(): v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     for k in ("COMPANY_NAME", "COMPANY_TAGLINE", "COMPANY_EMAIL", "COMPANY_PHONE", "COMPANY_WEBSITE",
-              "ANTHROPIC_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
+              "ANTHROPIC_MODEL", "GEMINI_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
+        if k in values:
+            values[k] = values[k].strip()
+    # API keys are often pasted with stray whitespace; passwords are kept exactly as typed.
+    for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
         if k in values:
             values[k] = values[k].strip()
     save_settings(values)
@@ -129,15 +171,20 @@ async def test_llm(payload: schemas.LLMTestRequest):
             if not base_url.startswith(("http://", "https://")):
                 raise HTTPException(400, "Ollama URL must start with http:// or https://")
             models = await list_ollama_models(base_url)
+        elif payload.provider == "gemini":
+            models = await list_gemini_models(payload.api_key.strip() or get_settings().GEMINI_API_KEY)
         else:
-            models = await list_anthropic_models(get_settings().ANTHROPIC_API_KEY)
+            models = await list_anthropic_models(payload.api_key.strip() or get_settings().ANTHROPIC_API_KEY)
     except LLMError as e:
         return {"ok": False, "error": str(e), "models": []}
     model = payload.model.strip()
     found = None
     if model:
         # Ollama treats a bare name as ":latest"
-        candidates = {model, f"{model}:latest"} if payload.provider == "ollama" else {model}
+        if payload.provider == "ollama":
+            candidates = {model, f"{model}:latest"}
+        else:
+            candidates = {model.removeprefix("models/")}
         found = any(m in candidates for m in models)
     return {"ok": True, "models": models, "model_found": found}
 
@@ -342,17 +389,24 @@ def add_item(prospect_id: int, payload: schemas.ProposalItemCreate, db: Session 
 
 @app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
 def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
-    if not db.get(models.Prospect, prospect_id):
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
         raise HTTPException(404, "Prospect not found")
     svc = db.get(models.Service, service_id)
     if not svc:
         raise HTTPException(404, "Service not found")
+    # Start per-user / per-endpoint lines at the prospect's counts.
+    count = {
+        "per_user": prospect.users,
+        "per_endpoint": prospect.endpoints,
+        "per_device": prospect.endpoints,
+    }.get(svc.price_unit)
     item = models.ProposalItem(
         prospect_id=prospect_id,
         service_id=svc.id,
         name=svc.name,
         description=svc.description,
-        quantity=1.0,
+        quantity=float(count) if count else 1.0,
         price=svc.default_price,
         price_unit=svc.price_unit,
         billing_cycle=svc.billing_cycle,
@@ -431,7 +485,8 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             "company_name": prospect.company_name,
             "contact_name": prospect.contact_name,
             "industry": prospect.industry,
-            "headcount": prospect.headcount,
+            "users": prospect.users,
+            "endpoints": prospect.endpoints,
             "notes": prospect.notes,
         },
         services=[
@@ -509,7 +564,8 @@ def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = "
         "email": prospect.email,
         "phone": prospect.phone,
         "industry": prospect.industry,
-        "headcount": prospect.headcount,
+        "users": prospect.users,
+        "endpoints": prospect.endpoints,
     }
     return prospect_dict, enriched, summary_notes or (prospect.notes or "")
 
@@ -580,6 +636,13 @@ INDEX_HTML = _render_index()
 @app.get("/")
 def index():
     return HTMLResponse(INDEX_HTML)
+
+
+@app.get("/favicon.png")
+@app.get("/favicon.ico")
+def favicon():
+    """The uploaded logo if there is one, otherwise the SwyfTech bird mark."""
+    return FileResponse(str(find_logo_path() or STATIC_DIR / "img" / "logo-mark.png"))
 
 
 @app.get("/healthz")

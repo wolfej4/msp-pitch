@@ -124,6 +124,7 @@ const DEFAULT_LOGO = "/static/img/logo-mark.png";
 
 function refreshHeaderLogo(hasLogo) {
   const src = hasLogo ? `/api/logo?t=${Date.now()}` : null;
+  $("#favicon").href = `/favicon.png?t=${Date.now()}`;
   // The header falls back to the SwyfTech mark; the Settings preview shows only an uploaded logo.
   $("#brandLogo").src = src || DEFAULT_LOGO;
   const preview = $("#settingsLogo");
@@ -214,6 +215,7 @@ function renderProspects() {
       <h3>${escapeHtml(p.company_name)}</h3>
       <div class="meta">${escapeHtml(p.contact_name || "—")}${p.industry ? " · " + escapeHtml(p.industry) : ""}</div>
       <div class="stats">
+        ${countsSummary(p) ? `<span>${countsSummary(p)}</span>` : ""}
         <span>Updated ${new Date(p.updated_at).toLocaleDateString()}</span>
       </div>
     `;
@@ -244,7 +246,7 @@ function newProspectModal() {
       <div class="field"><label>Email</label><input type="email" id="f_email"></div>
       <div class="field"><label>Phone</label><input type="tel" id="f_phone"></div>
     </div>
-    <div class="field"><label>Headcount</label><input type="text" id="f_headcount" placeholder="e.g. 15 users, 25 endpoints"></div>
+    ${countFields()}
     <div class="field"><label>Notes</label><textarea id="f_notes" rows="3"></textarea></div>
   `;
   openModal({
@@ -258,13 +260,14 @@ function newProspectModal() {
         onClick: async () => {
           const company = $("#f_company", form).value.trim();
           if (!company) { toast("Company name is required", true); return; }
+          if (!readCounts(form)) return;
           const data = {
             company_name: company,
             contact_name: $("#f_contact", form).value.trim(),
             industry: $("#f_industry", form).value.trim(),
             email: $("#f_email", form).value.trim(),
             phone: $("#f_phone", form).value.trim(),
-            headcount: $("#f_headcount", form).value.trim(),
+            ...readCounts(form),
             notes: $("#f_notes", form).value.trim(),
           };
           const created = await api("/api/prospects", { method: "POST", body: JSON.stringify(data) });
@@ -275,6 +278,36 @@ function newProspectModal() {
       },
     ],
   });
+}
+
+function countFields(p = {}) {
+  const v = (n) => (n == null ? "" : n);
+  return `
+    <div class="field-row">
+      <div class="field"><label>Users</label><input type="number" min="0" step="1" id="f_users" value="${v(p.users)}" placeholder="e.g. 15"></div>
+      <div class="field"><label>Endpoints</label><input type="number" min="0" step="1" id="f_endpoints" value="${v(p.endpoints)}" placeholder="e.g. 25"></div>
+    </div>
+    <div class="muted field-help">Per-user and per-endpoint/device services start at these quantities when added to the proposal.</div>`;
+}
+
+// {users, endpoints} with blank as null, or null (after a toast) if either is invalid.
+function readCounts(form) {
+  const out = {};
+  for (const key of ["users", "endpoints"]) {
+    const raw = $(`#f_${key}`, form).value.trim();
+    if (raw === "") { out[key] = null; continue; }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) { toast(`${key[0].toUpperCase() + key.slice(1)} must be a whole number`, true); return null; }
+    out[key] = n;
+  }
+  return out;
+}
+
+function countsSummary(p) {
+  const parts = [];
+  if (p.users != null) parts.push(`${p.users} user${p.users === 1 ? "" : "s"}`);
+  if (p.endpoints != null) parts.push(`${p.endpoints} endpoint${p.endpoints === 1 ? "" : "s"}`);
+  return parts.join(" · ");
 }
 
 function editProspectModal() {
@@ -290,7 +323,7 @@ function editProspectModal() {
       <div class="field"><label>Email</label><input type="email" id="f_email" value="${escapeAttr(p.email)}"></div>
       <div class="field"><label>Phone</label><input type="tel" id="f_phone" value="${escapeAttr(p.phone)}"></div>
     </div>
-    <div class="field"><label>Headcount</label><input type="text" id="f_headcount" value="${escapeAttr(p.headcount)}"></div>
+    ${countFields(p)}
     <div class="field"><label>Notes (also shown as "Discussion Summary" on PDF)</label><textarea id="f_notes" rows="4">${escapeHtml(p.notes)}</textarea></div>
   `;
   openModal({
@@ -302,13 +335,14 @@ function editProspectModal() {
         label: "Save",
         primary: true,
         onClick: async () => {
+          if (!readCounts(form)) return;
           const data = {
             company_name: $("#f_company", form).value.trim(),
             contact_name: $("#f_contact", form).value.trim(),
             industry: $("#f_industry", form).value.trim(),
             email: $("#f_email", form).value.trim(),
             phone: $("#f_phone", form).value.trim(),
-            headcount: $("#f_headcount", form).value.trim(),
+            ...readCounts(form),
             notes: $("#f_notes", form).value.trim(),
           };
           await api(`/api/prospects/${p.id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -325,6 +359,7 @@ async function openProspect(id) {
   state.activeProspectId = id;
   state.activeProspect = await api(`/api/prospects/${id}`);
   $("#activeProspectName").textContent = state.activeProspect.company_name;
+  $("#activeProspectCounts").textContent = countsSummary(state.activeProspect);
   showView("active");
   await Promise.all([loadProposalItems(), loadMessages(), renderCatalogQuick()]);
 }
@@ -421,6 +456,13 @@ async function sendChat(message) {
     $("#chatSubmitBtn").disabled = false;
   }
 }
+
+// Enter sends; Shift+Enter adds a new line. Skip while an IME is composing (e.g. accented input).
+$("#chatInput").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  if (!$("#chatSubmitBtn").disabled) $("#chatForm").requestSubmit();
+});
 
 $("#chatForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -520,23 +562,36 @@ function renderCatalogQuick() {
   const filtered = state.services.filter((s) => {
     if (cat && s.category !== cat) return false;
     if (!text) return true;
-    return s.name.toLowerCase().includes(text) || (s.category || "").toLowerCase().includes(text);
+    return (
+      s.name.toLowerCase().includes(text) ||
+      (s.category || "").toLowerCase().includes(text) ||
+      (s.description || "").toLowerCase().includes(text)
+    );
   });
   if (filtered.length === 0) {
     wrap.innerHTML = '<div class="empty-state" style="padding:20px;">No matching services.</div>';
     return;
   }
+  const inProposal = new Set(state.proposalItems.map((it) => it.service_id));
   for (const s of filtered) {
     const item = document.createElement("div");
     item.className = "catalog-quick-item";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.title = `Add "${s.name}" to the proposal`;
     item.innerHTML = `
       <div>
         <div class="cat-tag">${escapeHtml(s.category)}</div>
         <div class="name">${escapeHtml(s.name)}</div>
+        ${s.description ? `<div class="desc">${escapeHtml(s.description)}</div>` : ""}
       </div>
-      <div class="price">${fmtPrice(s)}</div>
+      <div class="side">
+        <div class="price">${fmtPrice(s)}</div>
+        ${inProposal.has(s.id) ? '<span class="added">In proposal</span>' : '<span class="add">+ Add</span>'}
+      </div>
     `;
     item.onclick = () => addServiceToProposal(s.id);
+    item.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addServiceToProposal(s.id); } };
     wrap.appendChild(item);
   }
 }
@@ -721,11 +776,13 @@ function renderProposal() {
   wrap.innerHTML = "";
   $("#proposalCount").textContent = `${state.proposalItems.length} item${state.proposalItems.length === 1 ? "" : "s"}`;
 
+  if (state.activeProspectId) renderCatalogQuick();  // refresh "In proposal" markers
   if (state.proposalItems.length === 0) {
-    wrap.innerHTML = '<div class="empty-state" style="padding:20px;">Click services from the catalog below or ask the AI to suggest some.</div>';
+    wrap.innerHTML = '<div class="empty-state" style="padding:20px;">Click services in the catalog or ask the AI to suggest some.</div>';
     renderTotals();
     return;
   }
+  wrap.insertAdjacentHTML("beforeend", '<div class="proposal-cols"><span>Qty</span><span>Price</span><span>Billing</span><span>Total</span></div>');
 
   for (const it of state.proposalItems) {
     const div = document.createElement("div");
@@ -850,7 +907,7 @@ async function openSettings() {
 }
 
 function renderSettings() {
-  const { values, env_defaults, overridden, secrets } = state.settings;
+  const { values, env_defaults, overridden, secret_sources } = state.settings;
   for (const input of settingsInputs()) {
     const key = input.dataset.key;
     if (input.type === "checkbox") input.checked = !!values[key];
@@ -864,45 +921,45 @@ function renderSettings() {
     if (typeof env === "boolean") env = env ? "on" : "off";
     hint.textContent = `Overrides environment value: ${env === "" ? "(blank)" : env}`;
   }
-  setSecretStatus($("#anthropicKeyStatus"), secrets.anthropic_api_key_set, "ANTHROPIC_API_KEY");
-  renderSmtpPassStatus(secrets.smtp_pass_source);
+  renderSecrets(secret_sources);
   syncProviderFields();
 }
 
-function renderSmtpPassStatus(source) {
-  const input = $("#smtpPass");
-  input.value = "";
-  if (source === "app") {
-    input.placeholder = "•••••••• (saved, type to replace)";
-    $("#smtpPassStatus").textContent = "Saved in the app.";
-  } else if (source === "env") {
-    input.placeholder = "Set via SMTP_PASS, type to override";
-    $("#smtpPassStatus").innerHTML = "Using the <code>SMTP_PASS</code> environment variable.";
-  } else {
-    input.placeholder = "";
-    $("#smtpPassStatus").textContent = "Not set.";
+// Write-only secret fields (SMTP password, API keys). The server only says where each value
+// comes from ("app", "env" or null); the value itself never reaches the page.
+const secretInputs = () => $$("#view-settings [data-secret]");
+
+function renderSecrets(sources) {
+  for (const input of secretInputs()) {
+    const key = input.dataset.secret, env = input.dataset.env, noun = input.dataset.noun;
+    const source = sources[key];
+    const status = $(`[data-secret-status="${key}"]`);
+    input.value = "";
+    if (source === "app") {
+      input.placeholder = `•••••••• (saved, type to replace)`;
+      status.textContent = "Saved in the app.";
+    } else if (source === "env") {
+      input.placeholder = `Set via ${env}, type to override`;
+      status.innerHTML = `Using the <code>${env}</code> environment variable.`;
+    } else {
+      input.placeholder = noun === "key" ? "Paste an API key" : `Enter a ${noun}`;
+      status.textContent = "Not set.";
+    }
+    $(`[data-secret-clear="${key}"]`).hidden = source !== "app";
   }
-  $("#btnClearSmtpPass").hidden = source !== "app";
 }
 
-async function clearSmtpPass() {
-  if (!confirm("Remove the SMTP password saved in the app?")) return;
+async function clearSecret(key, noun) {
+  if (!confirm(`Remove the ${noun} saved in the app?`)) return;
   try {
-    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ smtp_pass: "" }) });
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ [key]: "" }) });
   } catch (e) {
     setSettingsStatus("Not saved — " + describeApiError(e), "error");
     return;
   }
   renderSettings();
   await loadConfig();
-  setSettingsStatus("✓ Saved password removed", "ok");
-}
-
-function setSecretStatus(el, isSet, envName) {
-  el.className = "secret-status " + (isSet ? "ok" : "missing");
-  el.innerHTML = isSet
-    ? `✓ Set via <code>${envName}</code>`
-    : `Not set — add <code>${envName}</code> to the container's environment variables`;
+  setSettingsStatus(`✓ Saved ${noun} removed`, "ok");
 }
 
 function syncProviderFields() {
@@ -948,15 +1005,17 @@ async function saveSettings() {
   for (const [key, value] of Object.entries(form)) {
     if (value !== state.settings.values[key]) changed[key] = value;
   }
-  // Passwords are never sent back to the page, so a typed one is always a change. Not trimmed.
-  const smtpPass = $("#smtpPass").value;
-  if (smtpPass) changed.smtp_pass = smtpPass;
+  // Secrets are never sent back to the page, so anything typed is a change. Not trimmed here.
+  for (const input of secretInputs()) {
+    if (input.value) changed[input.dataset.secret] = input.value;
+  }
   if (Object.keys(changed).length === 0) { setSettingsStatus("No changes to save."); return; }
 
   const problems = [];
   if ("company_name" in changed && !changed.company_name) problems.push("Company name is required");
   if ("ollama_model" in changed && !changed.ollama_model) problems.push("Ollama model can't be blank");
   if ("anthropic_model" in changed && !changed.anthropic_model) problems.push("Anthropic model can't be blank");
+  if ("gemini_model" in changed && !changed.gemini_model) problems.push("Gemini model can't be blank");
   if ("ollama_base_url" in changed && !changed.ollama_base_url) problems.push("Ollama URL can't be blank");
   if ("smtp_port" in changed && !(changed.smtp_port >= 1 && changed.smtp_port <= 65535)) problems.push("SMTP port must be between 1 and 65535");
   if (problems.length) { setSettingsStatus(problems.join("; "), "error"); return; }
@@ -989,7 +1048,7 @@ async function resetSettings() {
 async function testLlm() {
   const data = readSettingsForm();
   const provider = data.llm_provider;
-  const model = provider === "ollama" ? data.ollama_model : data.anthropic_model;
+  const model = data[`${provider}_model`];
   const out = $("#llmTestResult");
   out.className = "test-result muted";
   out.textContent = "Testing…";
@@ -997,14 +1056,17 @@ async function testLlm() {
   try {
     const res = await api("/api/settings/test-llm", {
       method: "POST",
-      body: JSON.stringify({ provider, ollama_base_url: data.ollama_base_url, model }),
+      body: JSON.stringify({
+        provider, model, ollama_base_url: data.ollama_base_url,
+        api_key: $(`[data-secret="${provider}_api_key"]`)?.value || "",
+      }),
     });
     if (!res.ok) {
       out.className = "test-result error";
       out.textContent = res.error;
       return;
     }
-    const list = $(provider === "ollama" ? "#ollamaModels" : "#anthropicModels");
+    const list = $(`#${provider}Models`);
     list.innerHTML = res.models.map((m) => `<option value="${escapeAttr(m)}"></option>`).join("");
     const count = `${res.models.length} model${res.models.length === 1 ? "" : "s"} available`;
     if (res.model_found === false) {
@@ -1029,7 +1091,10 @@ $('#view-settings [data-key="llm_provider"]').addEventListener("change", () => {
   $("#llmTestResult").textContent = "";
 });
 $("#btnSaveSettings").onclick = saveSettings;
-$("#btnClearSmtpPass").onclick = clearSmtpPass;
+for (const btn of $$("#view-settings [data-secret-clear]")) {
+  const input = $(`[data-secret="${btn.dataset.secretClear}"]`);
+  btn.onclick = () => clearSecret(btn.dataset.secretClear, input.dataset.noun);
+}
 $("#btnResetSettings").onclick = resetSettings;
 $("#btnTestLlm").onclick = testLlm;
 

@@ -14,7 +14,8 @@ class ProspectBase(BaseModel):
     email: str = ""
     phone: str = ""
     industry: str = ""
-    headcount: str = ""
+    users: Optional[int] = Field(None, ge=0)
+    endpoints: Optional[int] = Field(None, ge=0)
     notes: str = ""
 
 
@@ -28,7 +29,8 @@ class ProspectUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     industry: Optional[str] = None
-    headcount: Optional[str] = None
+    users: Optional[int] = Field(None, ge=0)
+    endpoints: Optional[int] = Field(None, ge=0)
     notes: Optional[str] = None
 
 
@@ -145,6 +147,7 @@ class AppSettingsUpdate(BaseModel):
     company_website: Optional[str] = None
     llm_provider: Optional[str] = None
     anthropic_model: Optional[str] = Field(None, min_length=1)
+    gemini_model: Optional[str] = Field(None, min_length=1)
     ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = Field(None, min_length=1)
     smtp_host: Optional[str] = None
@@ -152,7 +155,10 @@ class AppSettingsUpdate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_from: Optional[str] = None
     smtp_tls: Optional[bool] = None
-    smtp_pass: Optional[str] = None  # write-only; "" removes the saved password
+    # Write-only secrets; "" removes the saved value (falling back to the env var).
+    smtp_pass: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
 
 
     @field_validator("llm_provider")
@@ -161,8 +167,8 @@ class AppSettingsUpdate(BaseModel):
         if v is None:
             return v
         v = v.strip().lower()
-        if v not in ("ollama", "anthropic"):
-            raise ValueError("must be 'ollama' or 'anthropic'")
+        if v not in ("ollama", "anthropic", "gemini"):
+            raise ValueError("must be 'ollama', 'anthropic' or 'gemini'")
         return v
 
     @field_validator("ollama_base_url")
@@ -177,6 +183,7 @@ class AppSettingsUpdate(BaseModel):
 
 
 class LLMTestRequest(BaseModel):
-    provider: Literal["ollama", "anthropic"]
+    provider: Literal["ollama", "anthropic", "gemini"]
+    api_key: str = ""  # an unsaved key typed into the form; blank uses the saved one
     ollama_base_url: str = ""
     model: str = ""
