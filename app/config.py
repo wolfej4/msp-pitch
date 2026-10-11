@@ -16,7 +16,7 @@ def find_logo_path() -> Path | None:
 
 class Settings(BaseSettings):
     # Branding
-    COMPANY_NAME: str = "Wolfden IT"
+    COMPANY_NAME: str = "SwyfTech"
     COMPANY_TAGLINE: str = "Managed IT Services"
     COMPANY_EMAIL: str = ""
     COMPANY_PHONE: str = ""
