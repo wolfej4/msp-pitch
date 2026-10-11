@@ -152,6 +152,7 @@ class AppSettingsUpdate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_from: Optional[str] = None
     smtp_tls: Optional[bool] = None
+    smtp_pass: Optional[str] = None  # write-only; "" removes the saved password
 
 
     @field_validator("llm_provider")

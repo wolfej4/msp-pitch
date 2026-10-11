@@ -13,7 +13,7 @@
 <header>
   <div class="brand">
     <img id="brandLogo" class="brand-logo" src="/static/img/logo-mark.png" alt="">
-    <span><span id="brandName">SwyfTech</span> <b>Pitch</b></span>
+    <span class="brand-name"><span id="brandName">Swyf<span class="brand-accent">Tech</span></span> Pitch</span>
   </div>
   <nav>
     <button class="nav-btn active" data-view="prospects">Prospects</button>
@@ -111,7 +111,7 @@
     </div>
     <p class="muted settings-intro">
       Changes take effect immediately — no restart needed. Anything you save here overrides the matching
-      environment variable. Secrets (the Anthropic API key and SMTP password) can only be set with environment variables.
+      environment variable. The Anthropic API key can only be set with an environment variable, and a saved SMTP password is never shown again.
     </p>
 
     <div class="settings-grid">
@@ -167,7 +167,14 @@
             <div class="field"><label>Port</label><input type="number" min="1" max="65535" data-key="smtp_port"><div class="hint" data-hint="smtp_port"></div></div>
           </div>
           <div class="field"><label>Username</label><input type="text" data-key="smtp_user" autocomplete="off"><div class="hint" data-hint="smtp_user"></div></div>
-          <div class="field"><label>Password</label><div class="secret-status" id="smtpPassStatus"></div></div>
+          <div class="field">
+            <label for="smtpPass">Password</label>
+            <input type="password" id="smtpPass" autocomplete="new-password" spellcheck="false">
+            <div class="secret-note">
+              <span id="smtpPassStatus"></span>
+              <button class="link" id="btnClearSmtpPass" hidden>Remove saved password</button>
+            </div>
+          </div>
           <div class="field"><label>From address</label><input type="email" data-key="smtp_from" placeholder="proposals@example.com"><div class="hint" data-hint="smtp_from"></div></div>
           <div class="field">
             <label class="checkbox"><input type="checkbox" data-key="smtp_tls"> Use STARTTLS</label>

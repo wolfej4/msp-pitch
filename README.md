@@ -26,7 +26,7 @@ Designed to run as a single container on Unraid / Portainer.
    volumes:
      - /mnt/user/appdata/msp-pitch/data:/app/data
    ```
-3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. Most of them can also be changed later from the app's **Settings** tab; the two secrets (`ANTHROPIC_API_KEY`, `SMTP_PASS`) can only be set here. At minimum:
+3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. Most of them can also be changed later from the app's **Settings** tab; `ANTHROPIC_API_KEY` can only be set here. At minimum:
    - `LLM_PROVIDER` = `ollama` or `anthropic`
    - If `ollama`: `OLLAMA_BASE_URL` (default uses `host.docker.internal:11434`) and `OLLAMA_MODEL`
    - If `anthropic`: `ANTHROPIC_API_KEY`
@@ -49,7 +49,8 @@ Branding, the AI provider/model/Ollama URL, and SMTP host/port/user/from/TLS can
 - Values saved there are stored in `data/msp.db` and **override** the matching environment variable. Each overridden field shows the env value it's replacing.
 - **Reset to environment defaults** drops every in-app override, so the env vars apply again.
 - **Test connection** checks the provider using the values on screen (even before you save) and fills the model field with the models it finds — for Ollama, that's whatever you've pulled.
-- Secrets are never stored or shown in the app: `ANTHROPIC_API_KEY` and `SMTP_PASS` must be set as environment variables. The Settings tab only shows whether each one is set.
+- `ANTHROPIC_API_KEY` must be set as an environment variable; the Settings tab only shows whether it's set.
+- The SMTP password can be typed into Settings. It's write-only: the app never sends it back to the browser, and leaving the field blank keeps the current one. It's stored in plain text in `data/msp.db`, so protect that file (and the app itself) accordingly. **Remove saved password** falls back to `SMTP_PASS` from the environment.
 
 ## LLM options
 

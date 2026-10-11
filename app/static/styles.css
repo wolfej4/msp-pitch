@@ -71,7 +71,9 @@ body {
 /* ---------- Header ---------- */
 header { display: flex; align-items: center; gap: 20px; padding: 10px 24px; background: var(--ink); color: #E7EEF8; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 700; font-size: 1.05rem; }
-.brand b { color: var(--accent); font-weight: 700; }
+.brand-name { font-weight: 800; letter-spacing: -.02em; }
+/* Same wordmark treatment as the website header: "Swyf" white, "Tech" in the brand gradient. */
+.brand-accent { background: linear-gradient(100deg, #3D7DFF 0%, #2FB6FF 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .brand-logo { height: 30px; width: auto; max-width: 120px; object-fit: contain; }
 .brand-logo.hidden { display: none; }
 nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; flex: 1; }
@@ -234,7 +236,9 @@ label { display: block; font-size: .85rem; font-weight: 600; color: var(--muted)
 .secret-status { font-size: .85rem; padding: 8px 10px; border-radius: 8px; }
 .secret-status.ok { background: var(--ok-bg); color: var(--ok-fg); }
 .secret-status.missing { background: var(--neutral-bg); color: var(--neutral-fg); }
-.secret-status code { font-family: var(--mono); font-size: .85em; }
+.secret-status code, .secret-note code { font-family: var(--mono); font-size: .85em; }
+.secret-note { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; font-size: .8rem; color: var(--muted); margin-top: 4px; }
+.secret-note button.link { font-size: .8rem; }
 label.checkbox { display: flex; align-items: center; gap: 8px; font-size: .95rem; font-weight: 500; color: var(--text); cursor: pointer; margin: 0; }
 .test-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .test-result { font-size: .85rem; }

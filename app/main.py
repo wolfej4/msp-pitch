@@ -1,11 +1,12 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -15,7 +16,7 @@ from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
 from .llm import LLMError, build_system_prompt, list_anthropic_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
-from .runtime_settings import EDITABLE_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
+from .runtime_settings import EDITABLE_KEYS, SECRET_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
 
 # ---------- Init ----------
@@ -83,15 +84,16 @@ def get_config():
 
 # ---------- Settings (editable in the UI) ----------
 def _settings_payload():
+    overrides = load_overrides()
     effective = get_settings()
     return {
         "values": {k.lower(): getattr(effective, k) for k in EDITABLE_KEYS},
         "env_defaults": {k.lower(): v for k, v in env_defaults().items()},
-        "overridden": sorted(k.lower() for k in load_overrides()),
-        # Secrets stay in env vars; only report whether they're present.
+        "overridden": sorted(k.lower() for k in overrides if k not in SECRET_KEYS),
+        # Secrets are never returned; only whether each is set, and where from.
         "secrets": {
             "anthropic_api_key_set": bool(effective.ANTHROPIC_API_KEY),
-            "smtp_pass_set": bool(effective.SMTP_PASS),
+            "smtp_pass_source": "app" if "SMTP_PASS" in overrides else ("env" if effective.SMTP_PASS else None),
         },
     }
 
@@ -562,9 +564,22 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+def _render_index() -> str:
+    """index.html with a content hash on the JS/CSS URLs, so any change to them is a new URL
+    and browsers can never pair a fresh page with a stale cached app.js."""
+    html = (STATIC_DIR / "index.html").read_text()
+    for name in ("app.js", "styles.css"):
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:12]
+        html = html.replace(f"/static/{name}\"", f"/static/{name}?v={digest}\"")
+    return html
+
+
+INDEX_HTML = _render_index()
+
+
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return HTMLResponse(INDEX_HTML)
 
 
 @app.get("/healthz")
