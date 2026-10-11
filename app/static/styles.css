@@ -274,6 +274,42 @@ label.checkbox { display: flex; align-items: center; gap: 8px; font-size: .95rem
 .test-result.ok { color: var(--ok-fg); }
 .test-result.error { color: var(--danger); }
 
+/* ---------- Badges, proposal status, CRM ---------- */
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; background: var(--neutral-bg); color: var(--neutral-fg); }
+.badge.status-sent { background: var(--info-bg); color: var(--info-fg); }
+.badge.status-accepted { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.status-declined { background: var(--bad-bg); color: var(--bad-fg); }
+.badge.crm { background: var(--info-bg); color: var(--info-fg); }
+.badge.sev-fail { background: var(--bad-bg); color: var(--bad-fg); }
+.badge.sev-partial { background: var(--warn-bg); color: var(--warn-fg); }
+
+.toolbar select.status-select { width: auto; height: calc(1.5em + 10px); padding: 2px 30px 2px 12px; border-radius: 999px; font-size: .85rem; font-weight: 700; background-position: right 10px center; background-size: 12px; }
+.status-select.status-sent { background-color: var(--info-bg); color: var(--info-fg); border-color: transparent; }
+.status-select.status-accepted { background-color: var(--ok-bg); color: var(--ok-fg); border-color: transparent; }
+.status-select.status-declined { background-color: var(--bad-bg); color: var(--bad-fg); border-color: transparent; }
+button.crm-chip { padding: 3px 12px; border-radius: 999px; font-size: .85rem; background: var(--info-bg); color: var(--info-fg); border-color: transparent; }
+button.crm-chip:hover { border-color: var(--brand); }
+
+.crm-search { margin-bottom: 10px; }
+.crm-results { display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.crm-result { display: grid; gap: 2px; justify-items: start; text-align: left; width: 100%; padding: 10px 12px; border-radius: 10px; font-weight: 400; }
+.crm-result .name { font-weight: 700; }
+.crm-result .muted { font-size: .85rem; }
+.crm-empty { padding: 12px 4px; }
+.crm-company { margin: 0 0 2px; font-size: 1.1rem; }
+.findings-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.findings-list .muted { font-size: .85rem; margin-top: 2px; }
+.panel-note { margin: 0 0 12px; font-size: .85rem; }
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.history li { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); display: grid; gap: 3px; font-size: .9rem; }
+.history-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.history-head a { margin-left: auto; font-weight: 600; }
+.history .ok, .modal .ok { color: var(--ok-fg); }
+.history .error, .modal .error, .crm-empty.error { color: var(--danger); }
+#m_summary { min-height: 240px; line-height: 1.6; margin-bottom: 10px; }
+a { color: var(--brand); }
+
 /* ---------- Modal ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(10, 22, 38, .55); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
 .modal-backdrop.hidden { display: none; }

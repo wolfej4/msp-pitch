@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import AsyncIterator, Dict, List, Tuple
+from typing import AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
 from anthropic import AsyncAnthropic
@@ -42,12 +42,41 @@ Rules:
 - If you're still asking discovery questions and not recommending anything yet, leave the line out entirely."""
 
 
+def assessment_block(a: Optional[Dict], limit: int = 15) -> str:
+    """The CRM assessment as plain text for a prompt: score, then findings most severe first."""
+    if not a:
+        return ""
+    draft = "" if a.get("status") == "complete" else ", draft (not finished)"
+    score = f"score {a['score']}/100 ({a['rating']})" if a.get("score") is not None else "not scored"
+    lines = [f"Assessed {a.get('assessed_on', '')}, {score}{draft}."]
+    findings = a.get("findings") or []
+    if findings:
+        lines.append("Findings, most severe first:")
+        for f in findings[:limit]:
+            line = f"- [{f['status_label']} · {f['severity']}] {f['title']} ({f['category']}). Recommended fix: {f['fix']}"
+            if f.get("note"):
+                line += f" Visit note: {f['note']}"
+            lines.append(line)
+        if len(findings) > limit:
+            lines.append(f"- …and {len(findings) - limit} lower-priority findings.")
+    else:
+        lines.append("No problems found on the items checked.")
+    if a.get("unverified"):
+        lines.append(f"{a['unverified']} checklist items weren't verified on the visit.")
+    if a.get("environment"):
+        lines.append("Environment: " + "; ".join(f"{e['label']}: {e['value']}" for e in a["environment"]))
+    if a.get("summary"):
+        lines.append(f"Assessor's summary: {a['summary']}")
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     prospect: Dict,
     services: List[Dict],
     company: Dict,
     proposal_items: List[str] = (),
     auto_add: bool = False,
+    assessment: Optional[Dict] = None,
 ) -> str:
     """Compose a system prompt that grounds the model in this MSP's catalog
     and the active prospect's context."""
@@ -97,7 +126,12 @@ You have two jobs in this conversation:
 ## Active Prospect
 {prospect_block}
 
-## Current Proposal
+{f"""## IT Assessment (from the CRM)
+{assessment_block(assessment)}
+
+These are real gaps found at this prospect. Recommend services that close the most severe findings first, and say which finding each recommendation addresses.
+
+""" if assessment else ""}## Current Proposal
 {proposal_block}
 
 ## Service Catalog
@@ -108,6 +142,52 @@ When you mention a service from the catalog, use its **exact name** in **bold** 
 
 class LLMError(Exception):
     pass
+
+
+def _money(n: float) -> str:
+    return f"${n:,.2f}"
+
+
+def build_summary_prompt(prospect: Dict, company: Dict, items: List[Dict], totals: Dict,
+                         assessment: Optional[Dict], transcript: List[Dict]) -> Tuple[str, List[Dict]]:
+    """System prompt + single user message asking for the proposal's executive summary."""
+    item_lines = "\n".join(
+        f"- {it['name']}: {it['description'] or ''}".rstrip(": ") for it in items
+    ) or "(no services on the proposal yet)"
+    convo = "\n\n".join(
+        f"{'Salesperson' if m['role'] == 'user' else 'Assistant'}: {m['content']}" for m in transcript[-30:]
+    ) or "(no conversation)"
+    system = f"""You write the executive summary at the top of a managed IT services proposal from {company['name']} to {prospect.get('company_name')}. The client reads it first, so it must be clear, specific and persuasive without hype.
+
+Write 2–3 short paragraphs (120–220 words total), addressed to the client as "you":
+1. What we heard: their situation and main concerns, in their terms.
+2. What we recommend and why: tie the proposed services to those concerns{' and to the most serious assessment findings' if assessment else ''}.
+3. What happens next (a short onboarding / next-step sentence).
+
+Rules: plain text only, no headings, bullet lists or markdown. Don't list prices; the proposal shows them. Use only facts from the material below; never invent numbers, names or incidents. Don't mention AI, the assistant, or this conversation."""
+    parts = [
+        f"Client: {prospect.get('company_name')}"
+        + (f", contact {prospect['contact_name']}" if prospect.get("contact_name") else "")
+        + (f", industry {prospect['industry']}" if prospect.get("industry") else "")
+        + (f", {prospect['users']} users" if prospect.get("users") is not None else "")
+        + (f", {prospect['endpoints']} endpoints" if prospect.get("endpoints") is not None else ""),
+        f"Salesperson's notes: {prospect.get('notes') or '(none)'}",
+        f"Proposed services:\n{item_lines}",
+        f"Totals: {_money(totals['monthly'])}/month recurring, {_money(totals['annual'])}/year, {_money(totals['one_time'])} one-time.",
+    ]
+    if assessment:
+        parts.append("IT assessment:\n" + assessment_block(assessment, limit=8))
+    parts.append(f"Discovery conversation (internal):\n{convo}")
+    return system, [{"role": "user", "content": "\n\n".join(parts) + "\n\nWrite the executive summary now."}]
+
+
+def clean_summary(text: str) -> str:
+    """Strip markdown the model may add anyway, and any stray PROPOSAL_ADD line."""
+    text, _ = extract_proposal_adds(text)
+    text = re.sub(r"^#+\s*", "", text, flags=re.M)
+    text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
+    text = re.sub(r"^(executive summary|summary)\s*:?\s*\n", "", text.strip(), flags=re.I)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 # ---------- Anthropic ----------
@@ -275,6 +355,11 @@ async def list_gemini_models(api_key: str) -> List[str]:
 
 
 # ---------- Public ----------
+async def complete(messages: List[Dict], system: str) -> str:
+    """Whole reply as one string (for drafting text rather than chatting)."""
+    return "".join([tok async for tok in stream_chat(messages, system)])
+
+
 async def stream_chat(messages: List[Dict], system: str) -> AsyncIterator[str]:
     cfg = get_settings()
     provider = cfg.LLM_PROVIDER.lower()

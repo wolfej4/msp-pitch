@@ -22,6 +22,7 @@ EDITABLE_KEYS = (
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
     "AUTO_ADD_SERVICES",
+    "CRM_URL",
     "SMTP_HOST",
     "SMTP_PORT",
     "SMTP_USER",
@@ -30,7 +31,7 @@ EDITABLE_KEYS = (
 )
 
 # Write-only: can be saved from the UI but never sent back to it.
-SECRET_KEYS = ("SMTP_PASS", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")
+SECRET_KEYS = ("SMTP_PASS", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CRM_API_TOKEN")
 
 
 def env_defaults() -> Dict:

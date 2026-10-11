@@ -87,6 +87,7 @@ async function loadConfig() {
   document.title = `${state.config.company_name} Pitch`;
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
   refreshHeaderLogo(state.config.has_logo);
+  $("#btnImportCrm").hidden = !state.config.crm_configured;
 }
 
 // "SwyfTech" -> "Swyf" + gradient "Tech", like the website's header.
@@ -214,6 +215,11 @@ function renderProspects() {
       <button class="delete-x" data-id="${p.id}" title="Delete">×</button>
       <h3>${escapeHtml(p.company_name)}</h3>
       <div class="meta">${escapeHtml(p.contact_name || "—")}${p.industry ? " · " + escapeHtml(p.industry) : ""}</div>
+      <div class="badges">
+        <span class="badge status-${escapeAttr(p.status)}">${STATUS_LABELS[p.status] || "Draft"}</span>
+        ${p.crm_company_id ? `<span class="badge crm" title="Linked to the CRM">CRM${p.crm_deal_stage ? " · " + escapeHtml(STAGE_LABELS[p.crm_deal_stage] || p.crm_deal_stage) : ""}</span>` : ""}
+        ${p.assessment?.score != null ? `<span class="badge">Assessment ${p.assessment.score}/100</span>` : ""}
+      </div>
       <div class="stats">
         ${countsSummary(p) ? `<span>${countsSummary(p)}</span>` : ""}
         <span>Updated ${new Date(p.updated_at).toLocaleDateString()}</span>
@@ -360,6 +366,7 @@ async function openProspect(id) {
   state.activeProspect = await api(`/api/prospects/${id}`);
   $("#activeProspectName").textContent = state.activeProspect.company_name;
   $("#activeProspectCounts").textContent = countsSummary(state.activeProspect);
+  renderProspectMeta();
   showView("active");
   await Promise.all([loadProposalItems(), loadMessages(), renderCatalogQuick()]);
 }
@@ -886,7 +893,7 @@ $("#btnEmailPdf").onclick = () => {
           const to = $("#e_to", form).value.trim();
           if (!to) { toast("Recipient email required", true); return; }
           try {
-            await api(`/api/prospects/${state.activeProspectId}/email`, {
+            const res = await api(`/api/prospects/${state.activeProspectId}/email`, {
               method: "POST",
               body: JSON.stringify({
                 to,
@@ -895,7 +902,8 @@ $("#btnEmailPdf").onclick = () => {
               }),
             });
             closeModal();
-            toast("Proposal sent to " + to);
+            await refreshActiveProspect();
+            toast("Proposal sent to " + to + crmNote(res), res.crm_ok === false);
           } catch (e) {
             toast("Email failed: " + e.message, true);
           }
@@ -958,7 +966,7 @@ function renderSecrets(sources) {
       input.placeholder = `Set via ${env}, type to override`;
       status.innerHTML = `Using the <code>${env}</code> environment variable.`;
     } else {
-      input.placeholder = noun === "key" ? "Paste an API key" : `Enter a ${noun}`;
+      input.placeholder = { key: "Paste an API key", token: "Paste the CRM's PITCH_API_TOKEN" }[noun] || `Enter a ${noun}`;
       status.textContent = "Not set.";
     }
     $(`[data-secret-clear="${key}"]`).hidden = source !== "app";
@@ -1113,6 +1121,327 @@ for (const btn of $$("#view-settings [data-secret-clear]")) {
 }
 $("#btnResetSettings").onclick = resetSettings;
 $("#btnTestLlm").onclick = testLlm;
+
+// ===== Proposal status, CRM link, summary, history =====
+const STATUS_LABELS = { draft: "Draft", sent: "Sent", accepted: "Accepted", declined: "Declined" };
+const STAGE_LABELS = {
+  new: "New lead", contacted: "Contacted", assessment: "Assessment", proposal: "Proposal sent", won: "Won", lost: "Lost",
+};
+const crmNote = (res) =>
+  res.crm_ok == null ? "" : res.crm_ok ? ` · ${res.crm_message}` : ` · CRM not updated: ${res.crm_message}`;
+
+async function refreshActiveProspect() {
+  state.activeProspect = await api(`/api/prospects/${state.activeProspectId}`);
+  renderProspectMeta();
+}
+
+function renderProspectMeta() {
+  const p = state.activeProspect;
+  const sel = $("#statusSelect");
+  sel.value = p.status || "draft";
+  sel.className = `status-select status-${sel.value}`;
+  const chip = $("#btnCrm");
+  if (p.crm_company_id) {
+    const parts = ["CRM"];
+    if (p.crm_deal_stage) parts.push(STAGE_LABELS[p.crm_deal_stage] || p.crm_deal_stage);
+    if (p.assessment?.score != null) parts.push(`Score ${p.assessment.score}/100`);
+    chip.textContent = parts.join(" · ");
+    chip.hidden = false;
+  } else {
+    chip.textContent = "Link to CRM";
+    chip.hidden = !state.config.crm_configured;
+  }
+}
+
+// --- Status ---
+async function changeStatus(status, to = "") {
+  const res = await api(`/api/prospects/${state.activeProspectId}/status`, {
+    method: "POST", body: JSON.stringify({ status, to }),
+  });
+  await refreshActiveProspect();
+  toast(`Marked ${STATUS_LABELS[status].toLowerCase()}${crmNote(res.event)}`, res.event.crm_ok === false);
+}
+
+$("#statusSelect").addEventListener("change", (e) => {
+  const p = state.activeProspect;
+  const status = e.target.value;
+  const revert = () => { e.target.value = p.status; renderProspectMeta(); };
+  const crmLine = (stage) => (p.crm_company_id ? `<p class="muted">The CRM deal will move to <strong>${stage}</strong>.</p>` : "");
+  if (status === "sent") {
+    const body = document.createElement("div");
+    body.innerHTML = `
+      <p>Use this when you sent the proposal yourself (for example, a downloaded PDF). Emailing it from here records the send automatically.</p>
+      <div class="field"><label>Sent to</label><input type="email" id="m_to" value="${escapeAttr(p.email)}"></div>
+      <p class="muted">A copy of the PDF as it is now is saved in History.</p>
+      ${crmLine("Proposal sent")}`;
+    openModal({
+      title: "Mark as sent", body,
+      footer: [
+        { label: "Cancel", onClick: () => { closeModal(); revert(); } },
+        { label: "Mark sent", primary: true, onClick: async () => { closeModal(); await changeStatus("sent", $("#m_to", body).value.trim()).catch((err) => { toast(err.message, true); revert(); }); } },
+      ],
+    });
+    return;
+  }
+  if ((status === "accepted" || status === "declined") && p.crm_company_id) {
+    const body = document.createElement("div");
+    body.innerHTML = `<p>Mark this proposal <strong>${STATUS_LABELS[status].toLowerCase()}</strong>?</p>${crmLine(status === "accepted" ? "Won (and the company becomes a client)" : "Lost")}`;
+    openModal({
+      title: `Proposal ${STATUS_LABELS[status].toLowerCase()}`, body,
+      footer: [
+        { label: "Cancel", onClick: () => { closeModal(); revert(); } },
+        { label: `Mark ${STATUS_LABELS[status].toLowerCase()}`, primary: true, onClick: async () => { closeModal(); await changeStatus(status).catch((err) => { toast(err.message, true); revert(); }); } },
+      ],
+    });
+    return;
+  }
+  changeStatus(status).catch((err) => { toast(err.message, true); revert(); });
+});
+
+// --- CRM company search (shared by import and link) ---
+function crmCompanyPicker(onPick) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <input type="text" class="crm-search" placeholder="Search CRM companies by name or city…" autocomplete="off">
+    <div class="crm-results" role="list"><div class="muted crm-empty">Loading…</div></div>`;
+  const input = $(".crm-search", wrap);
+  const results = $(".crm-results", wrap);
+  let timer = null;
+  let seq = 0;
+  const search = async () => {
+    const mine = ++seq;
+    let data;
+    try {
+      data = await api(`/api/crm/companies?q=${encodeURIComponent(input.value.trim())}`);
+    } catch (e) {
+      results.innerHTML = `<div class="crm-empty error">${escapeHtml(describeApiError(e))}</div>`;
+      return;
+    }
+    if (mine !== seq) return;  // a newer search is on its way
+    if (!data.companies.length) { results.innerHTML = '<div class="muted crm-empty">No matching companies.</div>'; return; }
+    results.innerHTML = "";
+    for (const c of data.companies) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "crm-result";
+      row.setAttribute("role", "listitem");
+      const meta = [c.city, c.open_deal_stage_label && `Deal: ${c.open_deal_stage_label}`, c.assessment_score != null && `Assessment ${c.assessment_score}/100`]
+        .filter(Boolean).map(escapeHtml).join(" · ");
+      row.innerHTML = `<span class="name">${escapeHtml(c.name)}</span><span class="muted">${meta || "&nbsp;"}</span>`;
+      row.onclick = () => onPick(c);
+      results.appendChild(row);
+    }
+  };
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  search();
+  setTimeout(() => input.focus(), 0);
+  return wrap;
+}
+
+function assessmentHtml(a, { limit = 6 } = {}) {
+  if (!a) return '<p class="muted">No assessment in the CRM for this company yet.</p>';
+  const head = `<p><strong>${a.score != null ? `${a.score}/100 · ${escapeHtml(a.rating)}` : "Not scored"}</strong>
+    <span class="muted"> · ${escapeHtml(a.assessed_on || "")}${a.status !== "complete" ? " · draft" : ""} · ${a.findings.length} finding${a.findings.length === 1 ? "" : "s"}</span>
+    ${a.report_url ? ` · <a href="${escapeAttr(a.report_url)}" target="_blank" rel="noopener">Full report</a>` : ""}</p>`;
+  const rows = a.findings.slice(0, limit).map((f) => `
+    <li><span class="badge sev-${escapeAttr(f.status)}">${escapeHtml(f.status_label)}</span> <strong>${escapeHtml(f.title)}</strong>
+      <div class="muted">${escapeHtml(f.fix)}</div></li>`).join("");
+  const more = a.findings.length > limit ? `<li class="muted">…and ${a.findings.length - limit} more</li>` : "";
+  return head + (rows ? `<ul class="findings-list">${rows}${more}</ul>` : "");
+}
+
+// --- Import a CRM company as a new prospect ---
+function importCrmModal() {
+  const body = document.createElement("div");
+  const pick = async (c) => {
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    let d;
+    try {
+      d = await api(`/api/crm/companies/${c.id}`);
+    } catch (e) {
+      body.innerHTML = `<p class="error">${escapeHtml(describeApiError(e))}</p>`;
+      return;
+    }
+    const deal = d.deals.find((x) => ["new", "contacted", "assessment", "proposal"].includes(x.stage));
+    const contactOpts = d.contacts.map((ct) =>
+      `<option value="${ct.id}" ${deal && deal.contact_id === ct.id ? "selected" : ""}>${escapeHtml(ct.name)}${ct.email ? ` (${escapeHtml(ct.email)})` : ""}</option>`).join("");
+    body.innerHTML = `
+      <h3 class="crm-company">${escapeHtml(d.company.name)}</h3>
+      <p class="muted">${[d.company.city, deal ? `Deal: ${STAGE_LABELS[deal.stage]}` : "No open deal (one is opened when you send the proposal)"].filter(Boolean).map(escapeHtml).join(" · ")}</p>
+      ${d.contacts.length ? `<div class="field"><label>Contact</label><select id="m_contact">${contactOpts}</select></div>` : '<p class="muted">No contacts on this company.</p>'}
+      <div class="field"><label>Assessment</label>${assessmentHtml(d.assessment, { limit: 4 })}</div>`;
+    $("#modalFooter").innerHTML = "";
+    for (const btn of [
+      { label: "Back", onClick: importCrmModal },
+      { label: "Import", primary: true, onClick: async () => {
+        try {
+          const created = await api("/api/prospects/import-crm", {
+            method: "POST", body: JSON.stringify({ company_id: d.company.id, contact_id: Number($("#m_contact", body)?.value) || null }),
+          });
+          closeModal();
+          await loadProspects();
+          await openProspect(created.id);
+          toast(`Imported ${created.company_name} from the CRM`);
+        } catch (e) {
+          toast("Import failed: " + describeApiError(e), true);
+        }
+      } },
+    ]) {
+      const b = document.createElement("button");
+      b.textContent = btn.label;
+      if (btn.primary) b.classList.add("primary");
+      b.onclick = btn.onClick;
+      $("#modalFooter").appendChild(b);
+    }
+  };
+  body.appendChild(crmCompanyPicker(pick));
+  openModal({ title: "Import from CRM", body, footer: [{ label: "Cancel", onClick: closeModal }] });
+}
+
+// --- Link / refresh / unlink the active prospect ---
+async function crmModal() {
+  const p = state.activeProspect;
+  const body = document.createElement("div");
+  if (!p.crm_company_id) {
+    body.appendChild(crmCompanyPicker(async (c) => {
+      try {
+        state.activeProspect = await api(`/api/prospects/${p.id}/crm`, { method: "POST", body: JSON.stringify({ company_id: c.id }) });
+        renderProspectMeta();
+        closeModal();
+        toast(`Linked to ${c.name} in the CRM`);
+      } catch (e) {
+        toast("Link failed: " + describeApiError(e), true);
+      }
+    }));
+    openModal({ title: "Link to a CRM company", body, footer: [{ label: "Cancel", onClick: closeModal }] });
+    return;
+  }
+  const crmUrl = state.config.crm_url;
+  body.innerHTML = `
+    <p>${p.crm_deal_stage ? `Deal stage: <strong>${escapeHtml(STAGE_LABELS[p.crm_deal_stage] || p.crm_deal_stage)}</strong>` : "No deal yet: one is opened when the proposal is sent."}
+      ${crmUrl ? ` · <a href="${escapeAttr(crmUrl)}/companies/${p.crm_company_id}" target="_blank" rel="noopener">Open in CRM</a>` : ""}</p>
+    <div class="field"><label>Assessment</label>${assessmentHtml(p.assessment, { limit: 10 })}</div>
+    <p class="muted">The AI uses these findings when recommending services, and the top ones appear on the PDF. Refresh after updating the assessment in the CRM.</p>`;
+  openModal({
+    title: "CRM link", body,
+    footer: [
+      { label: "Unlink", danger: true, onClick: async () => {
+        if (!confirm("Unlink this prospect from the CRM? Its assessment findings are removed from the proposal.")) return;
+        state.activeProspect = await api(`/api/prospects/${p.id}/crm`, { method: "DELETE" });
+        renderProspectMeta();
+        closeModal();
+        toast("Unlinked from the CRM");
+      } },
+      { label: "Refresh from CRM", onClick: async () => {
+        try {
+          state.activeProspect = await api(`/api/prospects/${p.id}/crm`, { method: "POST", body: JSON.stringify({ company_id: p.crm_company_id }) });
+          renderProspectMeta();
+          closeModal();
+          await crmModal();
+          toast("Refreshed from the CRM");
+        } catch (e) {
+          toast("Refresh failed: " + describeApiError(e), true);
+        }
+      } },
+      { label: "Done", primary: true, onClick: closeModal },
+    ],
+  });
+}
+
+// --- Executive summary ---
+function summaryModal() {
+  const p = state.activeProspect;
+  const body = document.createElement("div");
+  body.innerHTML = `
+    <p class="muted">The executive summary opens the PDF proposal. Draft it with AI from the conversation${p.assessment ? ", the assessment findings" : ""} and the services on the proposal, then edit it. If it's empty, the PDF shows your notes instead.</p>
+    <textarea id="m_summary" rows="12" placeholder="No summary yet.">${escapeHtml(p.summary || "")}</textarea>
+    <div class="test-row"><button class="small" id="m_draft">Draft with AI</button><span class="test-result muted" id="m_draft_status"></span></div>`;
+  const ta = $("#m_summary", body);
+  $("#m_draft", body).onclick = async () => {
+    if (ta.value.trim() && !confirm("Replace the current summary with a new AI draft?")) return;
+    const btn = $("#m_draft", body);
+    const status = $("#m_draft_status", body);
+    btn.disabled = true;
+    status.className = "test-result muted";
+    status.textContent = "Drafting… this can take a little while.";
+    try {
+      const res = await api(`/api/prospects/${p.id}/summary/draft`, { method: "POST" });
+      ta.value = res.summary;
+      status.className = "test-result ok";
+      status.textContent = "✓ Drafted. Review and edit it, then save.";
+    } catch (e) {
+      status.className = "test-result error";
+      status.textContent = describeApiError(e);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  openModal({
+    title: "Proposal summary", body,
+    footer: [
+      { label: "Cancel", onClick: closeModal },
+      { label: "Save", primary: true, onClick: async () => {
+        state.activeProspect = await api(`/api/prospects/${p.id}`, { method: "PATCH", body: JSON.stringify({ summary: ta.value.trim() }) });
+        closeModal();
+        toast("Summary saved");
+      } },
+    ],
+  });
+}
+
+// --- History ---
+async function historyModal() {
+  const p = state.activeProspect;
+  const events = await api(`/api/prospects/${p.id}/events`);
+  const body = document.createElement("div");
+  if (!events.length) {
+    body.innerHTML = '<p class="muted">Nothing yet. Emailing the proposal, or changing its status, is recorded here with a copy of the PDF as sent.</p>';
+  } else {
+    body.innerHTML = `<ul class="history">${events.map((e) => {
+      const when = new Date(e.created_at + (e.created_at.endsWith("Z") ? "" : "Z")).toLocaleString();
+      const value = [e.monthly + e.annual / 12 ? `${fmtMoney(e.monthly + e.annual / 12)}/mo` : "", e.one_time ? `${fmtMoney(e.one_time)} one-time` : ""].filter(Boolean).join(" + ");
+      const crm = e.crm_ok == null ? "" : `<div class="${e.crm_ok ? "ok" : "error"}">${e.crm_ok ? "✓" : "⚠"} ${escapeHtml(e.crm_message)}</div>`;
+      return `<li>
+        <div class="history-head"><span class="badge status-${escapeAttr(e.kind)}">${STATUS_LABELS[e.kind] || e.kind}</span>
+          <span class="muted">${escapeHtml(when)}</span>
+          ${e.has_pdf ? `<a href="/api/prospects/${p.id}/events/${e.id}/proposal.pdf">PDF as sent</a>` : ""}</div>
+        ${e.to_addr ? `<div>To ${escapeHtml(e.to_addr)}</div>` : ""}
+        ${value ? `<div class="muted">${value}</div>` : ""}
+        ${crm}
+      </li>`;
+    }).join("")}</ul>`;
+  }
+  openModal({ title: `History · ${p.company_name}`, body, footer: [{ label: "Done", primary: true, onClick: closeModal }] });
+}
+
+// --- Settings: test the CRM link ---
+$("#btnTestCrm").onclick = async () => {
+  const out = $("#crmTestResult");
+  out.className = "test-result muted";
+  out.textContent = "Testing…";
+  $("#btnTestCrm").disabled = true;
+  try {
+    const res = await api("/api/settings/test-crm", {
+      method: "POST",
+      body: JSON.stringify({
+        crm_url: $('#view-settings [data-key="crm_url"]').value.trim(),
+        api_token: $('[data-secret="crm_api_token"]').value,
+      }),
+    });
+    out.className = "test-result " + (res.ok ? "ok" : "error");
+    out.textContent = res.ok ? `✓ Connected — ${res.companies} compan${res.companies === 1 ? "y" : "ies"} found.` : res.error;
+  } catch (e) {
+    out.className = "test-result error";
+    out.textContent = describeApiError(e);
+  } finally {
+    $("#btnTestCrm").disabled = false;
+  }
+};
+
+$("#btnImportCrm").onclick = importCrmModal;
+$("#btnCrm").onclick = crmModal;
+$("#btnSummary").onclick = summaryModal;
+$("#btnHistory").onclick = () => historyModal().catch((e) => toast(e.message, true));
 
 // ===== Nav wiring =====
 $$(".nav-btn").forEach((b) => {

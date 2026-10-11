@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -19,11 +20,29 @@ class Prospect(Base):
     users = Column(Integer, nullable=True)
     endpoints = Column(Integer, nullable=True)
     notes = Column(Text, default="")
+    # Client-facing executive summary for the PDF (AI-drafted, then edited).
+    summary = Column(Text, default="")
+    # Proposal tracking: draft | sent | accepted | declined
+    status = Column(String, default="draft")
+    # Link to SwyfTech CRM records, plus a snapshot of the company's latest assessment.
+    crm_company_id = Column(Integer, nullable=True)
+    crm_contact_id = Column(Integer, nullable=True)
+    crm_deal_id = Column(Integer, nullable=True)
+    crm_deal_stage = Column(String, default="")
+    assessment_json = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     messages = relationship("Message", back_populates="prospect", cascade="all, delete-orphan")
     items = relationship("ProposalItem", back_populates="prospect", cascade="all, delete-orphan")
+    events = relationship("ProposalEvent", back_populates="prospect", cascade="all, delete-orphan")
+
+    @property
+    def assessment(self):
+        try:
+            return json.loads(self.assessment_json) if self.assessment_json else None
+        except ValueError:
+            return None
 
 
 class Message(Base):
@@ -89,3 +108,23 @@ class AppSetting(Base):
 
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=False)
+
+
+class ProposalEvent(Base):
+    """Proposal history: each send (with the PDF exactly as sent), acceptance or decline."""
+
+    __tablename__ = "proposal_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prospect_id = Column(Integer, ForeignKey("prospects.id", ondelete="CASCADE"), index=True)
+    kind = Column(String, nullable=False)  # sent | accepted | declined | draft
+    to_addr = Column(String, default="")
+    monthly = Column(Float, default=0.0)
+    annual = Column(Float, default=0.0)
+    one_time = Column(Float, default=0.0)
+    pdf = Column(LargeBinary, nullable=True)
+    crm_ok = Column(Boolean, nullable=True)  # None: not linked to the CRM
+    crm_message = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    prospect = relationship("Prospect", back_populates="events")

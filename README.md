@@ -9,8 +9,11 @@ Designed to run as a single container on Unraid / Portainer.
 - **AI-assisted discovery** — chat with an LLM that knows your service catalog, the active prospect's context, and what's already on their proposal. Services the AI recommends are added to the proposal automatically (turn this off under Settings → AI Model); you can also click any bolded service in chat to add it.
 - **Editable service catalog** — comes pre-seeded with ~20 common MSP offerings (Foundation, Cybersecurity, Cloud, Backup, Network, VoIP, Strategic, Compliance, plus a hospitality add-on). Edit pricing/units to fit your market.
 - **Live proposal builder** — recurring (monthly/annual) and one-time line items with computed totals.
-- **PDF export** — clean, branded proposal generated with WeasyPrint.
+- **PDF export** — clean, branded proposal generated with WeasyPrint, opening with an executive summary and, for CRM-linked prospects, the assessment findings the proposal addresses.
+- **AI-drafted summary** — **Summary → Draft with AI** writes the client-facing executive summary from the conversation, assessment and proposal; you edit it before it goes on the PDF.
 - **SMTP send** — email the PDF directly from the app.
+- **Proposal tracking** — each prospect is Draft, Sent, Accepted or Declined. **History** keeps every send (with the PDF exactly as sent) and every status change.
+- **SwyfTech CRM link** — start a prospect from a CRM company (contact, size, open deal and latest IT assessment come across), and the CRM deal follows the proposal: Proposal sent, Won or Lost.
 - **LLM choice** — Anthropic, Google Gemini, or local Ollama. Supports streaming responses.
 - **In-app settings** — change branding, AI provider/model and SMTP from the **Settings** tab, no restart needed.
 - **No external state** — SQLite file in a bind-mounted volume.
@@ -52,6 +55,21 @@ Branding, the AI provider/model/Ollama URL, and SMTP host/port/user/from/TLS can
 - **Test connection** checks the provider using the values on screen (even before you save) and fills the model field with the models it finds — for Ollama, that's whatever you've pulled.
 - Secrets — the Anthropic and Gemini API keys and the SMTP password — can be typed into Settings. They're write-only: the app never sends them back to the browser, and leaving a field blank keeps the current value. **Remove saved key/password** falls back to the environment variable (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `SMTP_PASS`).
 - Secrets saved in the app are stored in plain text in `data/msp.db`. The app has no login, so keep it on your LAN or behind SSO, and treat that file (and its backups) as sensitive.
+
+## CRM link (SwyfTech CRM)
+
+Pitch can work with [SwyfTech CRM](https://github.com/wolfej4/swyftech-crm) (it needs the CRM's `/api/pitch` API).
+
+**Set up:**
+1. Generate a token: `openssl rand -base64 32`.
+2. On the CRM, set it as `PITCH_API_TOKEN` and redeploy.
+3. In Pitch, **Settings → CRM**: enter the CRM's URL and paste the token, click **Test connection**, then **Save** (or set `CRM_URL` / `CRM_API_TOKEN` env vars). If Pitch and the CRM run on the same network, the CRM's LAN address (e.g. `http://192.168.1.50:3002`) works; via its public URL, Pangolin must let `/api/pitch/*` through without its own login.
+
+**What it does:**
+- **Import from CRM** (Prospects page) searches CRM companies. Pick one and its contact (the open deal's contact is preselected), and the new prospect gets the contact's details, users/endpoints (counts from the assessment visit win over the website form's ranges; a range like "6–15" is left blank for you to fill in), the open deal, and the latest assessment. An existing prospect can be linked with the **Link to CRM** chip.
+- **Assessment findings** go to the AI, which prioritizes services that close the most severe gaps and says which finding each addresses. The top findings (with why they matter and what you'll do) appear on the PDF, with a link to the full report when it's been shared in the CRM. **Refresh from CRM** (in the CRM chip) picks up assessment changes.
+- **Status sync:** emailing the proposal (or marking it **Sent** if you sent it yourself) moves the CRM deal to *Proposal sent*, sets its MRR and one-time value to the proposal's totals (annual items count as 1/12 per month), logs it, and adds a follow-up task three days out. **Accepted** marks the deal *Won* (and the company a client); **Declined** marks it *Lost*; either closes the follow-up task. If the company has no open deal, the CRM opens one.
+- If the CRM can't be reached, the email still goes out and the status still changes; History shows that the CRM wasn't updated and why.
 
 ## LLM options
 
@@ -100,6 +118,7 @@ msp-pitch/
     ├── models.py          # ORM models
     ├── schemas.py         # Pydantic schemas
     ├── llm.py             # Anthropic, Gemini + Ollama streaming clients
+    ├── crm.py             # SwyfTech CRM client (import, assessments, deal status)
     ├── pdf_generator.py   # WeasyPrint -> PDF
     ├── email_sender.py    # aiosmtplib
     ├── services_seed.py   # default catalog

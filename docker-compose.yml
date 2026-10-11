@@ -31,6 +31,10 @@ services:
       # Add services the AI recommends to the proposal automatically
       AUTO_ADD_SERVICES: "${AUTO_ADD_SERVICES:-true}"
 
+      # ---- SwyfTech CRM link (optional; also settable in Settings) ----
+      CRM_URL: "${CRM_URL:-}"
+      CRM_API_TOKEN: "${CRM_API_TOKEN:-}"
+
       # ---- SMTP (optional) ----
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-587}"

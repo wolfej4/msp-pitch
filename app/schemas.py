@@ -24,6 +24,7 @@ class ProspectCreate(ProspectBase):
 
 
 class ProspectUpdate(BaseModel):
+    summary: Optional[str] = None
     company_name: Optional[str] = None
     contact_name: Optional[str] = None
     email: Optional[str] = None
@@ -36,6 +37,13 @@ class ProspectUpdate(BaseModel):
 
 class ProspectOut(ProspectBase):
     id: int
+    summary: str = ""
+    status: str = "draft"
+    crm_company_id: Optional[int] = None
+    crm_contact_id: Optional[int] = None
+    crm_deal_id: Optional[int] = None
+    crm_deal_stage: str = ""
+    assessment: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
@@ -149,6 +157,7 @@ class AppSettingsUpdate(BaseModel):
     anthropic_model: Optional[str] = Field(None, min_length=1)
     gemini_model: Optional[str] = Field(None, min_length=1)
     auto_add_services: Optional[bool] = None
+    crm_url: Optional[str] = None
     ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = Field(None, min_length=1)
     smtp_host: Optional[str] = None
@@ -160,6 +169,7 @@ class AppSettingsUpdate(BaseModel):
     smtp_pass: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    crm_api_token: Optional[str] = None
 
 
     @field_validator("llm_provider")
@@ -170,6 +180,16 @@ class AppSettingsUpdate(BaseModel):
         v = v.strip().lower()
         if v not in ("ollama", "anthropic", "gemini"):
             raise ValueError("must be 'ollama', 'anthropic' or 'gemini'")
+        return v
+
+    @field_validator("crm_url")
+    @classmethod
+    def _crm_url(cls, v):
+        if not v or not v.strip():
+            return "" if v is not None else v  # blank turns the CRM link off
+        v = normalize_url(v)
+        if not re.match(r"^https?://\S+$", v):
+            raise ValueError("must be a URL like https://crm.example.com or http://192.168.1.50:3002")
         return v
 
     @field_validator("ollama_base_url")
@@ -188,3 +208,36 @@ class LLMTestRequest(BaseModel):
     api_key: str = ""  # an unsaved key typed into the form; blank uses the saved one
     ollama_base_url: str = ""
     model: str = ""
+
+
+# ---------- CRM link & proposal tracking ----------
+class CrmImport(BaseModel):
+    company_id: int
+    contact_id: Optional[int] = None
+
+
+class CrmLink(BaseModel):
+    company_id: int
+
+
+class CrmTestRequest(BaseModel):
+    crm_url: str = ""
+    api_token: str = ""  # typed into the form but not saved yet; blank uses the saved one
+
+
+class StatusChange(BaseModel):
+    status: Literal["draft", "sent", "accepted", "declined"]
+    to: str = ""  # for "sent": who it went to, when sent outside the app
+
+
+class ProposalEventOut(BaseModel):
+    id: int
+    kind: str
+    to_addr: str
+    monthly: float
+    annual: float
+    one_time: float
+    has_pdf: bool
+    crm_ok: Optional[bool]
+    crm_message: str
+    created_at: datetime
