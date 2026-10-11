@@ -10,6 +10,7 @@ const state = {
   activeProspect: null,
   proposalItems: [],
   messages: [],
+  settings: null,
 };
 
 // ===== Helpers =====
@@ -74,16 +75,19 @@ $("#modalBackdrop").onclick = (e) => { if (e.target.id === "modalBackdrop") clos
 
 // ===== Bootstrap =====
 async function bootstrap() {
+  await loadConfig();
+  await loadCategories();
+  await loadServices();
+  await loadProspects();
+}
+
+async function loadConfig() {
   state.config = await api("/api/config");
   $("#brandName").textContent = state.config.company_name;
   $("#brandTag").textContent = state.config.company_tagline || "";
   document.title = `${state.config.company_name} — Client Pitch`;
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
   refreshHeaderLogo(state.config.has_logo);
-
-  await loadCategories();
-  await loadServices();
-  await loadProspects();
 }
 
 // ===== Categories =====
@@ -111,14 +115,17 @@ function buildCategoryOptions(selected, { includeBlank = false, blankLabel = "Al
 }
 
 function refreshHeaderLogo(hasLogo) {
-  const img = $("#brandLogo");
-  if (hasLogo) {
-    img.src = `/api/logo?t=${Date.now()}`;
-    img.classList.remove("hidden");
-  } else {
-    img.removeAttribute("src");
-    img.classList.add("hidden");
+  const src = `/api/logo?t=${Date.now()}`;
+  for (const img of [$("#brandLogo"), $("#settingsLogo")]) {
+    if (hasLogo) {
+      img.src = src;
+      img.classList.remove("hidden");
+    } else {
+      img.removeAttribute("src");
+      img.classList.add("hidden");
+    }
   }
+  $("#settingsNoLogo").classList.toggle("hidden", !!hasLogo);
 }
 
 function logoModal() {
@@ -779,7 +786,7 @@ $("#btnDownloadPdf").onclick = () => {
 
 $("#btnEmailPdf").onclick = () => {
   if (!state.config.smtp_configured) {
-    toast("SMTP isn't configured. Set SMTP_HOST / SMTP_FROM in .env, then restart.", true);
+    toast("Email isn't configured. Set the SMTP host and From address under Settings.", true);
     return;
   }
   const p = state.activeProspect;
@@ -820,9 +827,139 @@ $("#btnEmailPdf").onclick = () => {
   });
 };
 
+// ===== Settings =====
+const settingsInputs = () => $$("#view-settings [data-key]");
+
+async function openSettings() {
+  showView("settings");
+  $("#llmTestResult").textContent = "";
+  $("#llmTestResult").className = "test-result muted";
+  try {
+    state.settings = await api("/api/settings");
+  } catch (e) {
+    toast("Failed to load settings: " + e.message, true);
+    return;
+  }
+  renderSettings();
+}
+
+function renderSettings() {
+  const { values, env_defaults, overridden, secrets } = state.settings;
+  for (const input of settingsInputs()) {
+    const key = input.dataset.key;
+    if (input.type === "checkbox") input.checked = !!values[key];
+    else input.value = values[key] ?? "";
+    input.placeholder = input.placeholder || String(env_defaults[key] ?? "");
+  }
+  for (const hint of $$("#view-settings [data-hint]")) {
+    const key = hint.dataset.hint;
+    if (!overridden.includes(key)) { hint.textContent = ""; continue; }
+    let env = env_defaults[key];
+    if (typeof env === "boolean") env = env ? "on" : "off";
+    hint.textContent = `Overrides environment value: ${env === "" ? "(blank)" : env}`;
+  }
+  setSecretStatus($("#anthropicKeyStatus"), secrets.anthropic_api_key_set, "ANTHROPIC_API_KEY");
+  setSecretStatus($("#smtpPassStatus"), secrets.smtp_pass_set, "SMTP_PASS");
+  syncProviderFields();
+}
+
+function setSecretStatus(el, isSet, envName) {
+  el.className = "secret-status " + (isSet ? "ok" : "missing");
+  el.innerHTML = isSet
+    ? `✓ Set via <code>${envName}</code>`
+    : `Not set — add <code>${envName}</code> to the container's environment variables`;
+}
+
+function syncProviderFields() {
+  const provider = $('#view-settings [data-key="llm_provider"]').value;
+  $$("#view-settings [data-provider]").forEach((el) => { el.hidden = el.dataset.provider !== provider; });
+}
+
+function readSettingsForm() {
+  const data = {};
+  for (const input of settingsInputs()) {
+    const key = input.dataset.key;
+    if (input.type === "checkbox") data[key] = input.checked;
+    else if (input.type === "number") data[key] = parseInt(input.value, 10);
+    else data[key] = input.value.trim();
+  }
+  return data;
+}
+
+async function saveSettings() {
+  const data = readSettingsForm();
+  if (!data.company_name) { toast("Company name is required", true); return; }
+  if (!/^https?:\/\/\S+$/.test(data.ollama_base_url)) { toast("Ollama URL must start with http:// or https://", true); return; }
+  if (!data.ollama_model || !data.anthropic_model) { toast("Model names can't be blank", true); return; }
+  if (!(data.smtp_port >= 1 && data.smtp_port <= 65535)) { toast("SMTP port must be between 1 and 65535", true); return; }
+  try {
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(data) });
+  } catch (e) {
+    toast("Save failed: " + e.message, true);
+    return;
+  }
+  renderSettings();
+  await loadConfig();
+  toast("Settings saved");
+}
+
+async function resetSettings() {
+  if (!confirm("Discard all settings saved here and go back to the environment variable values?")) return;
+  state.settings = await api("/api/settings", { method: "DELETE" });
+  renderSettings();
+  await loadConfig();
+  toast("Settings reset to environment defaults");
+}
+
+async function testLlm() {
+  const data = readSettingsForm();
+  const provider = data.llm_provider;
+  const model = provider === "ollama" ? data.ollama_model : data.anthropic_model;
+  const out = $("#llmTestResult");
+  out.className = "test-result muted";
+  out.textContent = "Testing…";
+  $("#btnTestLlm").disabled = true;
+  try {
+    const res = await api("/api/settings/test-llm", {
+      method: "POST",
+      body: JSON.stringify({ provider, ollama_base_url: data.ollama_base_url, model }),
+    });
+    if (!res.ok) {
+      out.className = "test-result error";
+      out.textContent = res.error;
+      return;
+    }
+    const list = $(provider === "ollama" ? "#ollamaModels" : "#anthropicModels");
+    list.innerHTML = res.models.map((m) => `<option value="${escapeAttr(m)}"></option>`).join("");
+    const count = `${res.models.length} model${res.models.length === 1 ? "" : "s"} available`;
+    if (res.model_found === false) {
+      out.className = "test-result error";
+      out.textContent = provider === "ollama"
+        ? `Connected (${count}), but "${model}" isn't pulled. Run: ollama pull ${model}`
+        : `Connected (${count}), but "${model}" isn't in the model list. Check the name.`;
+    } else {
+      out.className = "test-result ok";
+      out.textContent = `✓ Connected — ${count}. Pick one from the model field's suggestions.`;
+    }
+  } catch (e) {
+    out.className = "test-result error";
+    out.textContent = e.message;
+  } finally {
+    $("#btnTestLlm").disabled = false;
+  }
+}
+
+$('#view-settings [data-key="llm_provider"]').addEventListener("change", () => {
+  syncProviderFields();
+  $("#llmTestResult").textContent = "";
+});
+$("#btnSaveSettings").onclick = saveSettings;
+$("#btnResetSettings").onclick = resetSettings;
+$("#btnTestLlm").onclick = testLlm;
+
 // ===== Nav wiring =====
 $$(".nav-btn").forEach((b) => {
-  b.onclick = () => showView(b.dataset.view);
+  b.onclick = () => (b.dataset.view === "settings" ? openSettings() : showView(b.dataset.view));
 });
 $("#btnNewProspect").onclick = newProspectModal;
 $("#btnBackToList").onclick = () => { state.activeProspectId = null; showView("prospects"); loadProspects(); };

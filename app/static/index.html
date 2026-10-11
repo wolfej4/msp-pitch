@@ -19,7 +19,7 @@
   <nav>
     <button class="nav-btn active" data-view="prospects">Prospects</button>
     <button class="nav-btn" data-view="catalog">Service Catalog</button>
-    <button class="nav-btn" id="btnLogoSettings">Logo</button>
+    <button class="nav-btn" data-view="settings">Settings</button>
     <span class="llm-badge" id="llmBadge"></span>
   </nav>
 </header>
@@ -98,6 +98,84 @@
       </div>
     </div>
     <div id="catalogList" class="catalog-list"></div>
+  </section>
+
+  <!-- ===== SETTINGS VIEW ===== -->
+  <section id="view-settings" class="view">
+    <div class="toolbar">
+      <h1>Settings</h1>
+      <div class="toolbar-right">
+        <button id="btnResetSettings">Reset to environment defaults</button>
+        <button class="primary" id="btnSaveSettings">Save</button>
+      </div>
+    </div>
+    <p class="muted settings-intro">
+      Changes take effect immediately — no restart needed. Anything you save here overrides the matching
+      environment variable. Secrets (the Anthropic API key and SMTP password) can only be set with environment variables.
+    </p>
+
+    <div class="settings-grid">
+      <div class="panel">
+        <div class="panel-header"><h2>Branding</h2></div>
+        <div class="panel-body">
+          <div class="logo-row">
+            <img id="settingsLogo" class="brand-logo hidden" alt="">
+            <span class="muted" id="settingsNoLogo">No logo uploaded</span>
+            <button class="small" id="btnLogoSettings">Change logo…</button>
+          </div>
+          <div class="field"><label>Company name *</label><input type="text" data-key="company_name"><div class="hint" data-hint="company_name"></div></div>
+          <div class="field"><label>Tagline</label><input type="text" data-key="company_tagline"><div class="hint" data-hint="company_tagline"></div></div>
+          <div class="field-row">
+            <div class="field"><label>Email</label><input type="email" data-key="company_email"><div class="hint" data-hint="company_email"></div></div>
+            <div class="field"><label>Phone</label><input type="tel" data-key="company_phone"><div class="hint" data-hint="company_phone"></div></div>
+          </div>
+          <div class="field"><label>Website</label><input type="text" data-key="company_website" placeholder="https://"><div class="hint" data-hint="company_website"></div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h2>AI Model</h2></div>
+        <div class="panel-body">
+          <div class="field">
+            <label>Provider</label>
+            <select data-key="llm_provider">
+              <option value="ollama">Ollama (self-hosted)</option>
+              <option value="anthropic">Anthropic (cloud)</option>
+            </select>
+            <div class="hint" data-hint="llm_provider"></div>
+          </div>
+          <div data-provider="ollama">
+            <div class="field"><label>Ollama URL</label><input type="text" data-key="ollama_base_url" placeholder="http://host.docker.internal:11434"><div class="hint" data-hint="ollama_base_url"></div></div>
+            <div class="field"><label>Ollama model</label><input type="text" data-key="ollama_model" list="ollamaModels" autocomplete="off"><datalist id="ollamaModels"></datalist><div class="hint" data-hint="ollama_model"></div></div>
+          </div>
+          <div data-provider="anthropic">
+            <div class="field"><label>Anthropic model</label><input type="text" data-key="anthropic_model" list="anthropicModels" autocomplete="off"><datalist id="anthropicModels"></datalist><div class="hint" data-hint="anthropic_model"></div></div>
+            <div class="field"><label>API key</label><div class="secret-status" id="anthropicKeyStatus"></div></div>
+          </div>
+          <div class="test-row">
+            <button class="small" id="btnTestLlm">Test connection</button>
+            <span class="test-result muted" id="llmTestResult"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h2>Email (SMTP)</h2></div>
+        <div class="panel-body">
+          <div class="field-row">
+            <div class="field"><label>SMTP host</label><input type="text" data-key="smtp_host" placeholder="smtp.example.com"><div class="hint" data-hint="smtp_host"></div></div>
+            <div class="field"><label>Port</label><input type="number" min="1" max="65535" data-key="smtp_port"><div class="hint" data-hint="smtp_port"></div></div>
+          </div>
+          <div class="field"><label>Username</label><input type="text" data-key="smtp_user" autocomplete="off"><div class="hint" data-hint="smtp_user"></div></div>
+          <div class="field"><label>Password</label><div class="secret-status" id="smtpPassStatus"></div></div>
+          <div class="field"><label>From address</label><input type="email" data-key="smtp_from" placeholder="proposals@example.com"><div class="hint" data-hint="smtp_from"></div></div>
+          <div class="field">
+            <label class="checkbox"><input type="checkbox" data-key="smtp_tls"> Use STARTTLS</label>
+            <div class="hint" data-hint="smtp_tls"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
 </main>

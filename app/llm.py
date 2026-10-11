@@ -6,7 +6,8 @@ from typing import AsyncIterator, Dict, List
 import httpx
 from anthropic import AsyncAnthropic
 
-from .config import settings
+from .config import Settings
+from .runtime_settings import get_settings
 
 
 def build_system_prompt(prospect: Dict, services: List[Dict], company: Dict) -> str:
@@ -67,12 +68,12 @@ class LLMError(Exception):
 
 
 # ---------- Anthropic ----------
-async def _stream_anthropic(messages: List[Dict], system: str) -> AsyncIterator[str]:
-    if not settings.ANTHROPIC_API_KEY:
+async def _stream_anthropic(messages: List[Dict], system: str, cfg: Settings) -> AsyncIterator[str]:
+    if not cfg.ANTHROPIC_API_KEY:
         raise LLMError("ANTHROPIC_API_KEY is not set.")
-    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = AsyncAnthropic(api_key=cfg.ANTHROPIC_API_KEY)
     async with client.messages.stream(
-        model=settings.ANTHROPIC_MODEL,
+        model=cfg.ANTHROPIC_MODEL,
         max_tokens=2048,
         system=system,
         messages=messages,
@@ -82,13 +83,13 @@ async def _stream_anthropic(messages: List[Dict], system: str) -> AsyncIterator[
 
 
 # ---------- Ollama ----------
-async def _stream_ollama(messages: List[Dict], system: str) -> AsyncIterator[str]:
+async def _stream_ollama(messages: List[Dict], system: str, cfg: Settings) -> AsyncIterator[str]:
     payload = {
-        "model": settings.OLLAMA_MODEL,
+        "model": cfg.OLLAMA_MODEL,
         "messages": [{"role": "system", "content": system}] + messages,
         "stream": True,
     }
-    url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
+    url = f"{cfg.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     timeout = httpx.Timeout(120.0, connect=10.0)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -112,14 +113,50 @@ async def _stream_ollama(messages: List[Dict], system: str) -> AsyncIterator[str
         raise LLMError(f"Could not reach Ollama at {url}: {e}") from e
 
 
+# ---------- Model discovery ----------
+async def list_ollama_models(base_url: str) -> List[str]:
+    url = f"{base_url.rstrip('/')}/api/tags"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            r = await client.get(url)
+    except httpx.HTTPError as e:
+        raise LLMError(f"Could not reach Ollama at {base_url}: {e}") from e
+    if r.status_code != 200:
+        raise LLMError(f"Ollama returned HTTP {r.status_code} from {url}")
+    try:
+        return sorted(m["name"] for m in r.json().get("models", []))
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise LLMError(f"Unexpected response from {url} — is this an Ollama server?") from e
+
+
+async def list_anthropic_models(api_key: str) -> List[str]:
+    if not api_key:
+        raise LLMError("ANTHROPIC_API_KEY is not set.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            r = await client.get(
+                "https://api.anthropic.com/v1/models",
+                params={"limit": 100},
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            )
+    except httpx.HTTPError as e:
+        raise LLMError(f"Could not reach the Anthropic API: {e}") from e
+    if r.status_code == 401:
+        raise LLMError("Anthropic rejected the API key (HTTP 401).")
+    if r.status_code != 200:
+        raise LLMError(f"Anthropic API returned HTTP {r.status_code}")
+    return [m["id"] for m in r.json().get("data", [])]
+
+
 # ---------- Public ----------
 async def stream_chat(messages: List[Dict], system: str) -> AsyncIterator[str]:
-    provider = settings.LLM_PROVIDER.lower()
+    cfg = get_settings()
+    provider = cfg.LLM_PROVIDER.lower()
     if provider == "anthropic":
-        async for tok in _stream_anthropic(messages, system):
+        async for tok in _stream_anthropic(messages, system, cfg):
             yield tok
     elif provider == "ollama":
-        async for tok in _stream_ollama(messages, system):
+        async for tok in _stream_ollama(messages, system, cfg):
             yield tok
     else:
-        raise LLMError(f"Unknown LLM_PROVIDER: {settings.LLM_PROVIDER}")
+        raise LLMError(f"Unknown LLM_PROVIDER: {cfg.LLM_PROVIDER}")

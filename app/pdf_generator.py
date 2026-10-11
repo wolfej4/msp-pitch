@@ -10,7 +10,8 @@ from typing import Dict, List, Optional
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 
-from .config import find_logo_path, settings
+from .config import find_logo_path
+from .runtime_settings import get_settings
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(
@@ -56,6 +57,7 @@ def render_proposal_pdf(
     items: List[Dict],
     summary_notes: str = "",
 ) -> bytes:
+    settings = get_settings()
     template = _env.get_template("proposal.html")
     totals = _grouped_totals(items)
 

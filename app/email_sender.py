@@ -4,7 +4,7 @@ from email.message import EmailMessage
 
 import aiosmtplib
 
-from .config import settings
+from .runtime_settings import get_settings
 
 
 class EmailError(Exception):
@@ -18,6 +18,7 @@ async def send_proposal(
     pdf_bytes: bytes,
     pdf_filename: str = "proposal.pdf",
 ) -> None:
+    settings = get_settings()
     if not settings.SMTP_HOST:
         raise EmailError("SMTP_HOST is not configured.")
     if not settings.SMTP_FROM:
