@@ -1,6 +1,9 @@
 services:
   msp-pitch:
     build: .
+    # Rebuild on every deploy. Without this, `docker compose up` (and Portainer's
+    # redeploy) reuses the previously built image and code changes never show up.
+    pull_policy: build
     # Use this instead of build: when pulling from a registry:
     # image: ghcr.io/yourname/msp-pitch:latest
     container_name: msp-pitch
