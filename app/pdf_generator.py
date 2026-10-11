@@ -14,6 +14,7 @@ from .config import find_logo_path
 from .runtime_settings import get_settings
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"  # base for the template's font URLs
 _env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),
     autoescape=select_autoescape(["html", "xml"]),
@@ -89,5 +90,5 @@ def render_proposal_pdf(
     )
 
     buf = BytesIO()
-    HTML(string=html_str).write_pdf(target=buf)
+    HTML(string=html_str, base_url=str(STATIC_DIR)).write_pdf(target=buf)
     return buf.getvalue()

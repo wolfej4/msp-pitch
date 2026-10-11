@@ -1,7 +1,10 @@
+import re
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .config import normalize_url
 
 
 # ---------- Prospect ----------
@@ -140,15 +143,36 @@ class AppSettingsUpdate(BaseModel):
     company_email: Optional[str] = None
     company_phone: Optional[str] = None
     company_website: Optional[str] = None
-    llm_provider: Optional[Literal["ollama", "anthropic"]] = None
+    llm_provider: Optional[str] = None
     anthropic_model: Optional[str] = Field(None, min_length=1)
-    ollama_base_url: Optional[str] = Field(None, pattern=r"^https?://\S+$")
+    ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = Field(None, min_length=1)
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = Field(None, ge=1, le=65535)
     smtp_user: Optional[str] = None
     smtp_from: Optional[str] = None
     smtp_tls: Optional[bool] = None
+
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _provider(cls, v):
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if v not in ("ollama", "anthropic"):
+            raise ValueError("must be 'ollama' or 'anthropic'")
+        return v
+
+    @field_validator("ollama_base_url")
+    @classmethod
+    def _ollama_url(cls, v):
+        if v is None:
+            return v
+        v = normalize_url(v)
+        if not re.match(r"^https?://\S+$", v):
+            raise ValueError("must be a URL like http://192.168.1.50:11434")
+        return v
 
 
 class LLMTestRequest(BaseModel):

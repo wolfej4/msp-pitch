@@ -84,8 +84,7 @@ async function bootstrap() {
 async function loadConfig() {
   state.config = await api("/api/config");
   $("#brandName").textContent = state.config.company_name;
-  $("#brandTag").textContent = state.config.company_tagline || "";
-  document.title = `${state.config.company_name} — Client Pitch`;
+  document.title = `${state.config.company_name} Pitch`;
   $("#llmBadge").textContent = `${state.config.llm_provider}: ${state.config.llm_model}`;
   refreshHeaderLogo(state.config.has_logo);
 }
@@ -114,17 +113,16 @@ function buildCategoryOptions(selected, { includeBlank = false, blankLabel = "Al
   return opts.join("");
 }
 
+const DEFAULT_LOGO = "/static/img/logo-mark.png";
+
 function refreshHeaderLogo(hasLogo) {
-  const src = `/api/logo?t=${Date.now()}`;
-  for (const img of [$("#brandLogo"), $("#settingsLogo")]) {
-    if (hasLogo) {
-      img.src = src;
-      img.classList.remove("hidden");
-    } else {
-      img.removeAttribute("src");
-      img.classList.add("hidden");
-    }
-  }
+  const src = hasLogo ? `/api/logo?t=${Date.now()}` : null;
+  // The header falls back to the SwyfTech mark; the Settings preview shows only an uploaded logo.
+  $("#brandLogo").src = src || DEFAULT_LOGO;
+  const preview = $("#settingsLogo");
+  if (src) preview.src = src;
+  else preview.removeAttribute("src");
+  preview.classList.toggle("hidden", !hasLogo);
   $("#settingsNoLogo").classList.toggle("hidden", !!hasLogo);
 }
 
@@ -832,6 +830,7 @@ const settingsInputs = () => $$("#view-settings [data-key]");
 
 async function openSettings() {
   showView("settings");
+  setSettingsStatus("");
   $("#llmTestResult").textContent = "";
   $("#llmTestResult").className = "test-result muted";
   try {
@@ -886,20 +885,56 @@ function readSettingsForm() {
   return data;
 }
 
-async function saveSettings() {
-  const data = readSettingsForm();
-  if (!data.company_name) { toast("Company name is required", true); return; }
-  if (!/^https?:\/\/\S+$/.test(data.ollama_base_url)) { toast("Ollama URL must start with http:// or https://", true); return; }
-  if (!data.ollama_model || !data.anthropic_model) { toast("Model names can't be blank", true); return; }
-  if (!(data.smtp_port >= 1 && data.smtp_port <= 65535)) { toast("SMTP port must be between 1 and 65535", true); return; }
+function setSettingsStatus(msg, kind = "") {
+  const el = $("#settingsStatus");
+  el.textContent = msg;
+  el.className = "test-result " + kind;
+}
+
+// Turn a FastAPI 422 body into "Field: problem" lines.
+function describeApiError(e) {
+  const m = /^\d+: (.*)$/s.exec(e.message);
   try {
-    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(data) });
+    const detail = JSON.parse(m ? m[1] : e.message).detail;
+    if (Array.isArray(detail)) {
+      return detail.map((d) => `${String(d.loc?.[d.loc.length - 1] ?? "").replace(/_/g, " ")}: ${d.msg.replace(/^Value error, /, "")}`).join("; ");
+    }
+    if (detail) return String(detail);
+  } catch { /* not JSON */ }
+  return e.message;
+}
+
+async function saveSettings() {
+  // Only send what the user changed, so an odd value that came from an env var
+  // in some untouched field can't block saving everything else.
+  const form = readSettingsForm();
+  const changed = {};
+  for (const [key, value] of Object.entries(form)) {
+    if (value !== state.settings.values[key]) changed[key] = value;
+  }
+  if (Object.keys(changed).length === 0) { setSettingsStatus("No changes to save."); return; }
+
+  const problems = [];
+  if ("company_name" in changed && !changed.company_name) problems.push("Company name is required");
+  if ("ollama_model" in changed && !changed.ollama_model) problems.push("Ollama model can't be blank");
+  if ("anthropic_model" in changed && !changed.anthropic_model) problems.push("Anthropic model can't be blank");
+  if ("ollama_base_url" in changed && !changed.ollama_base_url) problems.push("Ollama URL can't be blank");
+  if ("smtp_port" in changed && !(changed.smtp_port >= 1 && changed.smtp_port <= 65535)) problems.push("SMTP port must be between 1 and 65535");
+  if (problems.length) { setSettingsStatus(problems.join("; "), "error"); return; }
+
+  $("#btnSaveSettings").disabled = true;
+  setSettingsStatus("Saving…", "muted");
+  try {
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(changed) });
   } catch (e) {
-    toast("Save failed: " + e.message, true);
+    setSettingsStatus("Not saved — " + describeApiError(e), "error");
     return;
+  } finally {
+    $("#btnSaveSettings").disabled = false;
   }
   renderSettings();
   await loadConfig();
+  setSettingsStatus("✓ Saved", "ok");
   toast("Settings saved");
 }
 
@@ -907,6 +942,7 @@ async function resetSettings() {
   if (!confirm("Discard all settings saved here and go back to the environment variable values?")) return;
   state.settings = await api("/api/settings", { method: "DELETE" });
   renderSettings();
+  setSettingsStatus("");
   await loadConfig();
   toast("Settings reset to environment defaults");
 }
