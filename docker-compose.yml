@@ -28,6 +28,12 @@ services:
       GEMINI_MODEL: "${GEMINI_MODEL:-gemini-3.8-flash}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.1:8b}"
+      # Add services the AI recommends to the proposal automatically
+      AUTO_ADD_SERVICES: "${AUTO_ADD_SERVICES:-true}"
+
+      # ---- SwyfTech CRM link (optional; also settable in Settings) ----
+      CRM_URL: "${CRM_URL:-}"
+      CRM_API_TOKEN: "${CRM_API_TOKEN:-}"
 
       # ---- SMTP (optional) ----
       SMTP_HOST: "${SMTP_HOST:-}"

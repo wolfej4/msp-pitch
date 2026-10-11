@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"
     OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
+    AUTO_ADD_SERVICES: bool = True  # add services the AI recommends to the proposal automatically
+
+    # SwyfTech CRM link (see the CRM's PITCH_API_TOKEN)
+    CRM_URL: str = ""
+    CRM_API_TOKEN: str = ""
 
     # SMTP
     SMTP_HOST: str = ""
@@ -58,9 +63,9 @@ class Settings(BaseSettings):
     def _normalize_provider(cls, v: str) -> str:
         return v.strip().lower()
 
-    @field_validator("OLLAMA_BASE_URL")
+    @field_validator("OLLAMA_BASE_URL", "CRM_URL")
     @classmethod
-    def _normalize_ollama_url(cls, v: str) -> str:
+    def _normalize_urls(cls, v: str) -> str:
         return normalize_url(v)
 
 

@@ -47,6 +47,15 @@
   .totals .label.grand { color: #0A1626; font-weight: 700; }
   .footer-note { margin-top: 28px; font-size: 8.5pt; color: #56667D; border-top: 1px solid #E2E8F1; padding-top: 10px; }
   .empty { color: #56667D; font-style: italic; }
+  .findings-intro { margin: 0 0 10px; }
+  .findings-more { margin: 8px 0 0; font-size: 9pt; color: #56667D; }
+  .findings a { color: #1E6BFF; text-decoration: none; }
+  .findings td.desc { width: 40%; }
+  .nowrap { white-space: nowrap; }
+  .status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 8pt; font-weight: 700; }
+  .status-fail { background: #FDE8E8; color: #9B1C1C; }
+  .status-partial { background: #FFF4D6; color: #7A5300; }
+  .sev { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #C62828; margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -84,8 +93,32 @@
 
 {% if summary_notes %}
 <section>
-  <h2>Discussion Summary</h2>
+  <h2>{{ summary_title }}</h2>
   <div class="summary">{{ summary_notes }}</div>
+</section>
+{% endif %}
+
+{% if findings %}
+<section class="findings">
+  <h2>What We Found in Your IT Assessment</h2>
+  <p class="findings-intro">
+    {% if assessment.score is not none %}Your environment scored <strong>{{ assessment.score }}/100</strong> ({{ assessment.rating }}){% if assessed_on %} on our assessment of {{ assessed_on }}{% endif %}.{% endif %}
+    These are the most important gaps, most serious first. The services below are chosen to close them.
+  </p>
+  <table>
+    <thead><tr><th>Finding</th><th>Status</th><th>What we'll do</th></tr></thead>
+    <tbody>
+      {% for f in findings %}
+      <tr>
+        <td><strong>{{ f.title }}</strong><div class="desc">{{ f.why }}</div></td>
+        <td class="nowrap"><span class="status status-{{ f.status }}">{{ f.status_label }}</span>{% if f.severity == "critical" %}<div class="sev">Critical</div>{% endif %}</td>
+        <td class="desc">{{ f.fix }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if assessment.findings|length > findings|length %}<p class="findings-more">Plus {{ assessment.findings|length - findings|length }} lower-priority items{% if assessment.report_url %}, covered in your <a href="{{ assessment.report_url }}">full assessment report</a>{% endif %}.</p>
+  {% elif assessment.report_url %}<p class="findings-more">See your <a href="{{ assessment.report_url }}">full assessment report</a> for details.</p>{% endif %}
 </section>
 {% endif %}
 

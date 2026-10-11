@@ -53,10 +53,23 @@ def _grouped_totals(items: List[Dict]) -> Dict[str, float]:
     return totals
 
 
+# Findings shown on the PDF, most severe first; the full report lives in the CRM.
+PDF_FINDINGS_LIMIT = 8
+
+
+def _long_date(ymd: Optional[str]) -> str:
+    try:
+        return datetime.strptime(ymd or "", "%Y-%m-%d").strftime("%B %-d, %Y")
+    except ValueError:
+        return ymd or ""
+
+
 def render_proposal_pdf(
     prospect: Dict,
     items: List[Dict],
     summary_notes: str = "",
+    summary_title: str = "Discussion Summary",
+    assessment: Optional[Dict] = None,
 ) -> bytes:
     settings = get_settings()
     template = _env.get_template("proposal.html")
@@ -86,6 +99,10 @@ def render_proposal_pdf(
         totals=totals,
         annualized_first_year=annualized,
         summary_notes=summary_notes,
+        summary_title=summary_title,
+        assessment=assessment,
+        findings=(assessment or {}).get("findings", [])[:PDF_FINDINGS_LIMIT],
+        assessed_on=_long_date((assessment or {}).get("assessed_on")),
         generated_on=datetime.now().strftime("%B %d, %Y"),
     )
 

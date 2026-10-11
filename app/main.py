@@ -1,10 +1,11 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
 import hashlib
+import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -12,11 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import crm, models, schemas
 from .config import DATA_DIR, LOGO_EXTS, find_logo_path, normalize_url
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
-from .llm import LLMError, build_system_prompt, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
+from .llm import LLMError, build_summary_prompt, build_system_prompt, clean_summary, complete, extract_proposal_adds, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
 from .runtime_settings import EDITABLE_KEYS, SECRET_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
@@ -51,15 +52,29 @@ def _seed_categories_if_empty():
         db.close()
 
 
+# Columns added to prospects after the first release; older databases get them at startup.
+PROSPECT_COLUMNS = {
+    "users": "INTEGER",
+    "endpoints": "INTEGER",
+    "summary": "TEXT DEFAULT ''",
+    "status": "VARCHAR DEFAULT 'draft'",
+    "crm_company_id": "INTEGER",
+    "crm_contact_id": "INTEGER",
+    "crm_deal_id": "INTEGER",
+    "crm_deal_stage": "VARCHAR DEFAULT ''",
+    "assessment_json": "TEXT DEFAULT ''",
+}
+
+
 def _migrate_prospect_counts():
     """Older databases have one free-text "headcount" field ("15 users, 25 endpoints").
     Add the users/endpoints columns and split what can be parsed into them; anything
     unparseable is kept by appending it to the prospect's notes."""
     cols = {c["name"] for c in inspect(engine).get_columns("prospects")}
     with engine.begin() as conn:
-        for col in ("users", "endpoints"):
+        for col, ddl in PROSPECT_COLUMNS.items():
             if col not in cols:
-                conn.exec_driver_sql(f"ALTER TABLE prospects ADD COLUMN {col} INTEGER")
+                conn.exec_driver_sql(f"ALTER TABLE prospects ADD COLUMN {col} {ddl}")
 
     db: Session = next(get_db())
     try:
@@ -116,6 +131,8 @@ def get_config():
             "gemini": settings.GEMINI_MODEL,
         }.get(settings.LLM_PROVIDER, settings.OLLAMA_MODEL),
         "smtp_configured": bool(settings.SMTP_HOST and settings.SMTP_FROM),
+        "crm_configured": crm.crm_configured(settings),
+        "crm_url": settings.CRM_URL,
         "has_logo": find_logo_path() is not None,
     }
 
@@ -149,7 +166,7 @@ def update_app_settings(payload: schemas.AppSettingsUpdate):
         if k in values:
             values[k] = values[k].strip()
     # API keys are often pasted with stray whitespace; passwords are kept exactly as typed.
-    for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+    for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CRM_API_TOKEN"):
         if k in values:
             values[k] = values[k].strip()
     save_settings(values)
@@ -387,14 +404,7 @@ def add_item(prospect_id: int, payload: schemas.ProposalItemCreate, db: Session 
     return item
 
 
-@app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
-def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
-    prospect = db.get(models.Prospect, prospect_id)
-    if not prospect:
-        raise HTTPException(404, "Prospect not found")
-    svc = db.get(models.Service, service_id)
-    if not svc:
-        raise HTTPException(404, "Service not found")
+def _add_service_item(db: Session, prospect: models.Prospect, svc: models.Service) -> models.ProposalItem:
     # Start per-user / per-endpoint lines at the prospect's counts.
     count = {
         "per_user": prospect.users,
@@ -402,7 +412,7 @@ def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depen
         "per_device": prospect.endpoints,
     }.get(svc.price_unit)
     item = models.ProposalItem(
-        prospect_id=prospect_id,
+        prospect_id=prospect.id,
         service_id=svc.id,
         name=svc.name,
         description=svc.description,
@@ -412,6 +422,41 @@ def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depen
         billing_cycle=svc.billing_cycle,
     )
     db.add(item)
+    return item
+
+
+def _auto_add_services(prospect_id: int, names: List[str]) -> None:
+    """Add the services the model listed in PROPOSAL_ADD, skipping unknown names and ones
+    already on the proposal."""
+    if not names:
+        return
+    db: Session = next(get_db())
+    try:
+        prospect = db.get(models.Prospect, prospect_id)
+        if not prospect:
+            return
+        norm = lambda s: " ".join(s.lower().replace("–", "-").replace("—", "-").split())
+        by_name = {norm(s.name): s for s in db.query(models.Service).filter_by(is_active=1)}
+        present = {row[0] for row in db.query(models.ProposalItem.service_id).filter_by(prospect_id=prospect_id)}
+        for name in names:
+            svc = by_name.get(norm(name))
+            if svc and svc.id not in present:
+                _add_service_item(db, prospect, svc)
+                present.add(svc.id)
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
+def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    svc = db.get(models.Service, service_id)
+    if not svc:
+        raise HTTPException(404, "Service not found")
+    item = _add_service_item(db, prospect, svc)
     db.commit()
     db.refresh(item)
     return item
@@ -480,6 +525,9 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
     )
 
     cfg = get_settings()
+    proposal_names = [
+        it.name for it in db.query(models.ProposalItem).filter_by(prospect_id=prospect_id).order_by(models.ProposalItem.id)
+    ]
     system_prompt = build_system_prompt(
         prospect={
             "company_name": prospect.company_name,
@@ -501,6 +549,9 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             for s in services
         ],
         company={"name": cfg.COMPANY_NAME, "tagline": cfg.COMPANY_TAGLINE},
+        proposal_items=proposal_names,
+        auto_add=cfg.AUTO_ADD_SERVICES,
+        assessment=prospect.assessment,
     )
 
     chat_messages = [{"role": m.role, "content": m.content} for m in history if m.role in ("user", "assistant")]
@@ -516,8 +567,10 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             full.append(err)
             yield err
         finally:
-            # Save assistant message after stream ends
-            content = "".join(full).strip()
+            # Save the reply without its hidden PROPOSAL_ADD line, then act on that line.
+            content, names = extract_proposal_adds("".join(full))
+            if cfg.AUTO_ADD_SERVICES:
+                _auto_add_services(prospect_id, names)
             if content:
                 db2: Session = next(get_db())
                 try:
@@ -530,7 +583,7 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
 
 
 # ---------- PDF ----------
-def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = ""):
+def _load_proposal_payload(prospect_id: int, db: Session):
     prospect = db.get(models.Prospect, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
@@ -566,40 +619,49 @@ def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = "
         "industry": prospect.industry,
         "users": prospect.users,
         "endpoints": prospect.endpoints,
+        "notes": prospect.notes,
     }
-    return prospect_dict, enriched, summary_notes or (prospect.notes or "")
+    return prospect, prospect_dict, enriched
+
+
+def _render_pdf(prospect: models.Prospect, prospect_dict: Dict, items: List[Dict]) -> bytes:
+    # The executive summary when there is one; older proposals fall back to the notes.
+    if (prospect.summary or "").strip():
+        text, title = prospect.summary, "Executive Summary"
+    else:
+        text, title = prospect.notes or "", "Discussion Summary"
+    return render_proposal_pdf(prospect_dict, items, text, summary_title=title, assessment=prospect.assessment)
+
+
+def _pdf_filename(name: str) -> str:
+    safe = "".join(c for c in name if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
+    return f"{safe or 'proposal'}_proposal.pdf"
 
 
 @app.get("/api/prospects/{prospect_id}/proposal.pdf")
 def download_proposal(prospect_id: int, db: Session = Depends(get_db)):
-    prospect, items, notes = _load_proposal_payload(prospect_id, db)
-    pdf_bytes = render_proposal_pdf(prospect, items, notes)
-    safe = "".join(c for c in prospect["company_name"] if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
-    filename = f"{safe or 'proposal'}_proposal.pdf"
+    prospect, prospect_dict, items = _load_proposal_payload(prospect_id, db)
     return Response(
-        content=pdf_bytes,
+        content=_render_pdf(prospect, prospect_dict, items),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{_pdf_filename(prospect.company_name)}"'},
     )
 
 
 # ---------- Email ----------
 @app.post("/api/prospects/{prospect_id}/email")
 async def email_proposal(prospect_id: int, payload: schemas.EmailRequest, db: Session = Depends(get_db)):
-    prospect, items, notes = _load_proposal_payload(prospect_id, db)
-    pdf_bytes = render_proposal_pdf(prospect, items, notes)
+    prospect, prospect_dict, items = _load_proposal_payload(prospect_id, db)
+    pdf_bytes = _render_pdf(prospect, prospect_dict, items)
     settings = get_settings()
 
-    subject = payload.subject or f"Proposal from {settings.COMPANY_NAME} for {prospect['company_name']}"
+    subject = payload.subject or f"Proposal from {settings.COMPANY_NAME} for {prospect.company_name}"
     body = payload.body or (
-        f"Hi {prospect.get('contact_name') or 'there'},\n\n"
+        f"Hi {prospect.contact_name or 'there'},\n\n"
         f"Thanks for the conversation. Attached is the proposal we discussed.\n\n"
         f"Let me know if you'd like to make any adjustments — happy to refine it.\n\n"
         f"— {settings.COMPANY_NAME}\n"
     )
-
-    safe = "".join(c for c in prospect["company_name"] if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
-    filename = f"{safe or 'proposal'}_proposal.pdf"
 
     try:
         await send_proposal(
@@ -607,12 +669,225 @@ async def email_proposal(prospect_id: int, payload: schemas.EmailRequest, db: Se
             subject=subject,
             body=body,
             pdf_bytes=pdf_bytes,
-            pdf_filename=filename,
+            pdf_filename=_pdf_filename(prospect.company_name),
         )
     except EmailError as e:
         raise HTTPException(500, str(e))
 
-    return {"status": "sent", "to": payload.to}
+    event = await _record_status(db, prospect, "sent", to=payload.to, pdf=pdf_bytes)
+    return {"status": "sent", "to": payload.to, "crm_ok": event.crm_ok, "crm_message": event.crm_message}
+
+
+# ---------- Proposal tracking ----------
+def _totals(db: Session, prospect_id: int) -> Dict[str, float]:
+    totals = {"monthly": 0.0, "annual": 0.0, "one_time": 0.0}
+    for it in db.query(models.ProposalItem).filter_by(prospect_id=prospect_id):
+        totals[it.billing_cycle] = totals.get(it.billing_cycle, 0.0) + it.quantity * it.price
+    return totals
+
+
+async def _record_status(db: Session, prospect: models.Prospect, status: str, *, to: str = "", pdf: Optional[bytes] = None):
+    """Set the proposal status, log it in the history (a send keeps the PDF as sent), and
+    move the linked CRM deal to match. A CRM failure is recorded, never raised."""
+    totals = _totals(db, prospect.id)
+    event = models.ProposalEvent(
+        prospect_id=prospect.id, kind=status, to_addr=to, pdf=pdf,
+        monthly=totals["monthly"], annual=totals["annual"], one_time=totals["one_time"],
+    )
+    prospect.status = status
+    prospect.updated_at = datetime.utcnow()
+    if prospect.crm_company_id and status != "draft":
+        try:
+            result = await crm.record_proposal(prospect.crm_company_id, {
+                "status": status,
+                "deal_id": prospect.crm_deal_id,
+                "contact_id": prospect.crm_contact_id,
+                "mrr": round(totals["monthly"] + totals["annual"] / 12, 2),
+                "onetime": round(totals["one_time"], 2),
+                "sent_to": to,
+            })
+            prospect.crm_deal_id = result["deal_id"]
+            prospect.crm_deal_stage = result["stage"]
+            event.crm_ok, event.crm_message = True, f"CRM deal: {result['stage_label']}"
+        except crm.CRMError as e:
+            event.crm_ok, event.crm_message = False, str(e)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def _event_out(e: models.ProposalEvent) -> schemas.ProposalEventOut:
+    return schemas.ProposalEventOut(
+        id=e.id, kind=e.kind, to_addr=e.to_addr or "", monthly=e.monthly or 0, annual=e.annual or 0,
+        one_time=e.one_time or 0, has_pdf=e.pdf is not None, crm_ok=e.crm_ok, crm_message=e.crm_message or "",
+        created_at=e.created_at,
+    )
+
+
+@app.post("/api/prospects/{prospect_id}/status")
+async def set_status(prospect_id: int, payload: schemas.StatusChange, db: Session = Depends(get_db)):
+    """Mark a proposal sent (e.g. delivered outside the app), accepted, declined, or back to draft."""
+    prospect, prospect_dict, items = _load_proposal_payload(prospect_id, db)
+    pdf = _render_pdf(prospect, prospect_dict, items) if payload.status == "sent" else None
+    event = await _record_status(db, prospect, payload.status, to=payload.to.strip(), pdf=pdf)
+    return {"status": prospect.status, "event": _event_out(event)}
+
+
+@app.get("/api/prospects/{prospect_id}/events", response_model=List[schemas.ProposalEventOut])
+def list_events(prospect_id: int, db: Session = Depends(get_db)):
+    if not db.get(models.Prospect, prospect_id):
+        raise HTTPException(404, "Prospect not found")
+    events = db.query(models.ProposalEvent).filter_by(prospect_id=prospect_id).order_by(models.ProposalEvent.id.desc())
+    return [_event_out(e) for e in events]
+
+
+@app.get("/api/prospects/{prospect_id}/events/{event_id}/proposal.pdf")
+def event_pdf(prospect_id: int, event_id: int, db: Session = Depends(get_db)):
+    e = db.get(models.ProposalEvent, event_id)
+    if not e or e.prospect_id != prospect_id or e.pdf is None:
+        raise HTTPException(404, "No PDF was saved for that entry")
+    p = db.get(models.Prospect, prospect_id)
+    name = _pdf_filename(f"{p.company_name} {e.created_at:%Y-%m-%d}")
+    return Response(content=e.pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---------- Executive summary ----------
+@app.post("/api/prospects/{prospect_id}/summary/draft")
+async def draft_summary(prospect_id: int, db: Session = Depends(get_db)):
+    """AI-drafted executive summary from the conversation, assessment and proposal. Returned for
+    review, not saved: the user edits it and saves with PATCH."""
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    cfg = get_settings()
+    items = db.query(models.ProposalItem).filter_by(prospect_id=prospect_id).order_by(models.ProposalItem.id).all()
+    transcript = [
+        {"role": m.role, "content": m.content}
+        for m in db.query(models.Message).filter_by(prospect_id=prospect_id).order_by(models.Message.id)
+        if m.role in ("user", "assistant")
+    ]
+    system, messages = build_summary_prompt(
+        prospect={
+            "company_name": prospect.company_name, "contact_name": prospect.contact_name, "industry": prospect.industry,
+            "users": prospect.users, "endpoints": prospect.endpoints, "notes": prospect.notes,
+        },
+        company={"name": cfg.COMPANY_NAME},
+        items=[{"name": it.name, "description": it.description} for it in items],
+        totals=_totals(db, prospect_id),
+        assessment=prospect.assessment,
+        transcript=transcript,
+    )
+    try:
+        text = clean_summary(await complete(messages, system))
+    except LLMError as e:
+        raise HTTPException(502, f"The AI couldn't draft a summary: {e}")
+    if not text:
+        raise HTTPException(502, "The AI returned an empty summary. Try again.")
+    return {"summary": text}
+
+
+# ---------- CRM link ----------
+@app.post("/api/settings/test-crm")
+async def test_crm(payload: schemas.CrmTestRequest):
+    url = normalize_url(payload.crm_url) if payload.crm_url.strip() else ""
+    token = payload.api_token.strip()
+    # The saved token only ever goes to the saved CRM URL, so this can't be used to send it elsewhere.
+    if not token and url and url != get_settings().CRM_URL:
+        return {"ok": False, "error": "Paste the API token to test a new CRM URL (the saved token is only sent to the saved URL)."}
+    try:
+        companies = await crm.search_companies("", url=url, token=token)
+    except crm.CRMError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "companies": len(companies)}
+
+
+@app.get("/api/crm/companies")
+async def crm_companies(q: str = ""):
+    try:
+        return {"companies": await crm.search_companies(q.strip()[:100])}
+    except crm.CRMError as e:
+        raise HTTPException(502, str(e))
+
+
+async def _crm_detail(company_id: int) -> Dict:
+    try:
+        return await crm.company_detail(company_id)
+    except crm.CRMError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/crm/companies/{company_id}")
+async def crm_company(company_id: int):
+    return await _crm_detail(company_id)
+
+
+def _apply_crm(prospect: models.Prospect, detail: Dict, contact_id: Optional[int] = None) -> None:
+    """Copy the CRM link, open deal and assessment snapshot onto the prospect."""
+    deal = crm.open_deal(detail)
+    prospect.crm_company_id = detail["company"]["id"]
+    prospect.crm_deal_id = deal["id"] if deal else prospect.crm_deal_id
+    prospect.crm_deal_stage = deal["stage"] if deal else prospect.crm_deal_stage or ""
+    if contact_id:
+        prospect.crm_contact_id = contact_id
+    elif deal and deal.get("contact_id"):
+        prospect.crm_contact_id = prospect.crm_contact_id or deal["contact_id"]
+    prospect.assessment_json = json.dumps(detail["assessment"]) if detail.get("assessment") else ""
+    prospect.updated_at = datetime.utcnow()
+
+
+@app.post("/api/prospects/import-crm", response_model=schemas.ProspectOut)
+async def import_from_crm(payload: schemas.CrmImport, db: Session = Depends(get_db)):
+    """New prospect from a CRM company: contact, size, open deal and latest assessment."""
+    detail = await _crm_detail(payload.company_id)
+    company = detail["company"]
+    contacts = detail.get("contacts") or []
+    deal = crm.open_deal(detail)
+    contact = next((c for c in contacts if c["id"] == payload.contact_id), None) \
+        or next((c for c in contacts if deal and c["id"] == deal.get("contact_id")), None) \
+        or (contacts[0] if contacts else None)
+    counts = crm.counts_from(detail)
+    p = models.Prospect(
+        company_name=company["name"],
+        contact_name=contact["name"] if contact else "",
+        email=contact["email"] if contact else "",
+        phone=(contact or {}).get("phone") or company.get("phone") or "",
+        users=counts["users"],
+        endpoints=counts["endpoints"],
+    )
+    _apply_crm(p, detail, contact["id"] if contact else None)
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@app.post("/api/prospects/{prospect_id}/crm", response_model=schemas.ProspectOut)
+async def link_crm(prospect_id: int, payload: schemas.CrmLink, db: Session = Depends(get_db)):
+    """Link an existing prospect to a CRM company (or refresh the link and assessment)."""
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    if prospect.crm_company_id != payload.company_id:
+        prospect.crm_deal_id = prospect.crm_contact_id = None
+        prospect.crm_deal_stage = ""
+    _apply_crm(prospect, await _crm_detail(payload.company_id))
+    db.commit()
+    db.refresh(prospect)
+    return prospect
+
+
+@app.delete("/api/prospects/{prospect_id}/crm", response_model=schemas.ProspectOut)
+def unlink_crm(prospect_id: int, db: Session = Depends(get_db)):
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    prospect.crm_company_id = prospect.crm_contact_id = prospect.crm_deal_id = None
+    prospect.crm_deal_stage = ""
+    prospect.assessment_json = ""
+    db.commit()
+    db.refresh(prospect)
+    return prospect
 
 
 # ---------- Static frontend ----------
