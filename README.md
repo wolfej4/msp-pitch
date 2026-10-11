@@ -31,7 +31,7 @@ Designed to run as a single container on Unraid / Portainer.
    - If `anthropic`: `ANTHROPIC_API_KEY`
 4. **Build & deploy.** Browse to `http://<your-host>:8080`.
 
-To put it behind your existing NPM at `pitch.wolfe.house`, just point a proxy host at the container on port `8000` (internally) or `8080` (via host) — same pattern you use for your other Wolfden services.
+To put it behind Nginx Proxy Manager (or any reverse proxy), point a proxy host at the container on port `8000` (internally) or `8080` (via host).
 
 ## Local run (for testing)
 

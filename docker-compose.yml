@@ -10,7 +10,7 @@ services:
       - ./data:/app/data
     environment:
       # ---- Branding ----
-      COMPANY_NAME: "${COMPANY_NAME:-Wolfden IT}"
+      COMPANY_NAME: "${COMPANY_NAME:-SwyfTech}"
       COMPANY_TAGLINE: "${COMPANY_TAGLINE:-Managed IT Services}"
       COMPANY_EMAIL: "${COMPANY_EMAIL:-hello@example.com}"
       COMPANY_PHONE: "${COMPANY_PHONE:-}"
