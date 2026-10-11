@@ -26,7 +26,7 @@ Designed to run as a single container on Unraid / Portainer.
    volumes:
      - /mnt/user/appdata/msp-pitch/data:/app/data
    ```
-3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. Most of them can also be changed later from the app's **Settings** tab; the API keys (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) can only be set here. At minimum:
+3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. All of them except `DATABASE_URL` can also be set or changed later from the app's **Settings** tab, including the API keys and SMTP password. At minimum:
    - `LLM_PROVIDER` = `ollama`, `anthropic` or `gemini`
    - If `ollama`: `OLLAMA_BASE_URL` (default uses `host.docker.internal:11434`) and `OLLAMA_MODEL`
    - If `anthropic`: `ANTHROPIC_API_KEY`
@@ -50,8 +50,8 @@ Branding, the AI provider/model/Ollama URL, and SMTP host/port/user/from/TLS can
 - Values saved there are stored in `data/msp.db` and **override** the matching environment variable. Each overridden field shows the env value it's replacing.
 - **Reset to environment defaults** drops every in-app override, so the env vars apply again.
 - **Test connection** checks the provider using the values on screen (even before you save) and fills the model field with the models it finds — for Ollama, that's whatever you've pulled.
-- `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` must be set as environment variables; the Settings tab only shows whether each is set.
-- The SMTP password can be typed into Settings. It's write-only: the app never sends it back to the browser, and leaving the field blank keeps the current one. It's stored in plain text in `data/msp.db`, so protect that file (and the app itself) accordingly. **Remove saved password** falls back to `SMTP_PASS` from the environment.
+- Secrets — the Anthropic and Gemini API keys and the SMTP password — can be typed into Settings. They're write-only: the app never sends them back to the browser, and leaving a field blank keeps the current value. **Remove saved key/password** falls back to the environment variable (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `SMTP_PASS`).
+- Secrets saved in the app are stored in plain text in `data/msp.db`. The app has no login, so keep it on your LAN or behind SSO, and treat that file (and its backups) as sensitive.
 
 ## LLM options
 

@@ -128,11 +128,10 @@ def _settings_payload():
         "values": {k.lower(): getattr(effective, k) for k in EDITABLE_KEYS},
         "env_defaults": {k.lower(): v for k, v in env_defaults().items()},
         "overridden": sorted(k.lower() for k in overrides if k not in SECRET_KEYS),
-        # Secrets are never returned; only whether each is set, and where from.
-        "secrets": {
-            "anthropic_api_key_set": bool(effective.ANTHROPIC_API_KEY),
-            "gemini_api_key_set": bool(effective.GEMINI_API_KEY),
-            "smtp_pass_source": "app" if "SMTP_PASS" in overrides else ("env" if effective.SMTP_PASS else None),
+        # Secrets are never returned; only where each one comes from: "app", "env" or None.
+        "secret_sources": {
+            k.lower(): "app" if k in overrides else ("env" if getattr(effective, k) else None)
+            for k in SECRET_KEYS
         },
     }
 
@@ -147,6 +146,10 @@ def update_app_settings(payload: schemas.AppSettingsUpdate):
     values = {k.upper(): v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     for k in ("COMPANY_NAME", "COMPANY_TAGLINE", "COMPANY_EMAIL", "COMPANY_PHONE", "COMPANY_WEBSITE",
               "ANTHROPIC_MODEL", "GEMINI_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
+        if k in values:
+            values[k] = values[k].strip()
+    # API keys are often pasted with stray whitespace; passwords are kept exactly as typed.
+    for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
         if k in values:
             values[k] = values[k].strip()
     save_settings(values)
@@ -169,9 +172,9 @@ async def test_llm(payload: schemas.LLMTestRequest):
                 raise HTTPException(400, "Ollama URL must start with http:// or https://")
             models = await list_ollama_models(base_url)
         elif payload.provider == "gemini":
-            models = await list_gemini_models(get_settings().GEMINI_API_KEY)
+            models = await list_gemini_models(payload.api_key.strip() or get_settings().GEMINI_API_KEY)
         else:
-            models = await list_anthropic_models(get_settings().ANTHROPIC_API_KEY)
+            models = await list_anthropic_models(payload.api_key.strip() or get_settings().ANTHROPIC_API_KEY)
     except LLMError as e:
         return {"ok": False, "error": str(e), "models": []}
     model = payload.model.strip()

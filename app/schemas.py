@@ -155,7 +155,10 @@ class AppSettingsUpdate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_from: Optional[str] = None
     smtp_tls: Optional[bool] = None
-    smtp_pass: Optional[str] = None  # write-only; "" removes the saved password
+    # Write-only secrets; "" removes the saved value (falling back to the env var).
+    smtp_pass: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
 
 
     @field_validator("llm_provider")
@@ -181,5 +184,6 @@ class AppSettingsUpdate(BaseModel):
 
 class LLMTestRequest(BaseModel):
     provider: Literal["ollama", "anthropic", "gemini"]
+    api_key: str = ""  # an unsaved key typed into the form; blank uses the saved one
     ollama_base_url: str = ""
     model: str = ""

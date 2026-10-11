@@ -265,10 +265,7 @@ label { display: block; font-size: .85rem; font-weight: 600; color: var(--muted)
 .logo-row .hidden { display: none; }
 .hint { font-size: .8rem; color: var(--warn-fg); margin-top: 4px; }
 .hint:empty { display: none; }
-.secret-status { font-size: .85rem; padding: 8px 10px; border-radius: 8px; }
-.secret-status.ok { background: var(--ok-bg); color: var(--ok-fg); }
-.secret-status.missing { background: var(--neutral-bg); color: var(--neutral-fg); }
-.secret-status code, .secret-note code { font-family: var(--mono); font-size: .85em; }
+.secret-note code { font-family: var(--mono); font-size: .85em; }
 .secret-note { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; font-size: .8rem; color: var(--muted); margin-top: 4px; }
 .secret-note button.link { font-size: .8rem; }
 label.checkbox { display: flex; align-items: center; gap: 8px; font-size: .95rem; font-weight: 500; color: var(--text); cursor: pointer; margin: 0; }

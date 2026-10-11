@@ -907,7 +907,7 @@ async function openSettings() {
 }
 
 function renderSettings() {
-  const { values, env_defaults, overridden, secrets } = state.settings;
+  const { values, env_defaults, overridden, secret_sources } = state.settings;
   for (const input of settingsInputs()) {
     const key = input.dataset.key;
     if (input.type === "checkbox") input.checked = !!values[key];
@@ -921,46 +921,45 @@ function renderSettings() {
     if (typeof env === "boolean") env = env ? "on" : "off";
     hint.textContent = `Overrides environment value: ${env === "" ? "(blank)" : env}`;
   }
-  setSecretStatus($("#anthropicKeyStatus"), secrets.anthropic_api_key_set, "ANTHROPIC_API_KEY");
-  setSecretStatus($("#geminiKeyStatus"), secrets.gemini_api_key_set, "GEMINI_API_KEY");
-  renderSmtpPassStatus(secrets.smtp_pass_source);
+  renderSecrets(secret_sources);
   syncProviderFields();
 }
 
-function renderSmtpPassStatus(source) {
-  const input = $("#smtpPass");
-  input.value = "";
-  if (source === "app") {
-    input.placeholder = "•••••••• (saved, type to replace)";
-    $("#smtpPassStatus").textContent = "Saved in the app.";
-  } else if (source === "env") {
-    input.placeholder = "Set via SMTP_PASS, type to override";
-    $("#smtpPassStatus").innerHTML = "Using the <code>SMTP_PASS</code> environment variable.";
-  } else {
-    input.placeholder = "";
-    $("#smtpPassStatus").textContent = "Not set.";
+// Write-only secret fields (SMTP password, API keys). The server only says where each value
+// comes from ("app", "env" or null); the value itself never reaches the page.
+const secretInputs = () => $$("#view-settings [data-secret]");
+
+function renderSecrets(sources) {
+  for (const input of secretInputs()) {
+    const key = input.dataset.secret, env = input.dataset.env, noun = input.dataset.noun;
+    const source = sources[key];
+    const status = $(`[data-secret-status="${key}"]`);
+    input.value = "";
+    if (source === "app") {
+      input.placeholder = `•••••••• (saved, type to replace)`;
+      status.textContent = "Saved in the app.";
+    } else if (source === "env") {
+      input.placeholder = `Set via ${env}, type to override`;
+      status.innerHTML = `Using the <code>${env}</code> environment variable.`;
+    } else {
+      input.placeholder = noun === "key" ? "Paste an API key" : `Enter a ${noun}`;
+      status.textContent = "Not set.";
+    }
+    $(`[data-secret-clear="${key}"]`).hidden = source !== "app";
   }
-  $("#btnClearSmtpPass").hidden = source !== "app";
 }
 
-async function clearSmtpPass() {
-  if (!confirm("Remove the SMTP password saved in the app?")) return;
+async function clearSecret(key, noun) {
+  if (!confirm(`Remove the ${noun} saved in the app?`)) return;
   try {
-    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ smtp_pass: "" }) });
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify({ [key]: "" }) });
   } catch (e) {
     setSettingsStatus("Not saved — " + describeApiError(e), "error");
     return;
   }
   renderSettings();
   await loadConfig();
-  setSettingsStatus("✓ Saved password removed", "ok");
-}
-
-function setSecretStatus(el, isSet, envName) {
-  el.className = "secret-status " + (isSet ? "ok" : "missing");
-  el.innerHTML = isSet
-    ? `✓ Set via <code>${envName}</code>`
-    : `Not set — add <code>${envName}</code> to the container's environment variables`;
+  setSettingsStatus(`✓ Saved ${noun} removed`, "ok");
 }
 
 function syncProviderFields() {
@@ -1006,9 +1005,10 @@ async function saveSettings() {
   for (const [key, value] of Object.entries(form)) {
     if (value !== state.settings.values[key]) changed[key] = value;
   }
-  // Passwords are never sent back to the page, so a typed one is always a change. Not trimmed.
-  const smtpPass = $("#smtpPass").value;
-  if (smtpPass) changed.smtp_pass = smtpPass;
+  // Secrets are never sent back to the page, so anything typed is a change. Not trimmed here.
+  for (const input of secretInputs()) {
+    if (input.value) changed[input.dataset.secret] = input.value;
+  }
   if (Object.keys(changed).length === 0) { setSettingsStatus("No changes to save."); return; }
 
   const problems = [];
@@ -1056,7 +1056,10 @@ async function testLlm() {
   try {
     const res = await api("/api/settings/test-llm", {
       method: "POST",
-      body: JSON.stringify({ provider, ollama_base_url: data.ollama_base_url, model }),
+      body: JSON.stringify({
+        provider, model, ollama_base_url: data.ollama_base_url,
+        api_key: $(`[data-secret="${provider}_api_key"]`)?.value || "",
+      }),
     });
     if (!res.ok) {
       out.className = "test-result error";
@@ -1088,7 +1091,10 @@ $('#view-settings [data-key="llm_provider"]').addEventListener("change", () => {
   $("#llmTestResult").textContent = "";
 });
 $("#btnSaveSettings").onclick = saveSettings;
-$("#btnClearSmtpPass").onclick = clearSmtpPass;
+for (const btn of $$("#view-settings [data-secret-clear]")) {
+  const input = $(`[data-secret="${btn.dataset.secretClear}"]`);
+  btn.onclick = () => clearSecret(btn.dataset.secretClear, input.dataset.noun);
+}
 $("#btnResetSettings").onclick = resetSettings;
 $("#btnTestLlm").onclick = testLlm;
 

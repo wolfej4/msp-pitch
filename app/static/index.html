@@ -108,7 +108,7 @@
     </div>
     <p class="muted settings-intro">
       Changes take effect immediately — no restart needed. Anything you save here overrides the matching
-      environment variable. API keys (Anthropic, Gemini) can only be set with environment variables, and a saved SMTP password is never shown again.
+      environment variable. Saved passwords and API keys are never shown again.
     </p>
 
     <div class="settings-grid">
@@ -148,11 +148,25 @@
           </div>
           <div data-provider="anthropic">
             <div class="field"><label>Anthropic model</label><input type="text" data-key="anthropic_model" list="anthropicModels" autocomplete="off"><datalist id="anthropicModels"></datalist><div class="hint" data-hint="anthropic_model"></div></div>
-            <div class="field"><label>API key</label><div class="secret-status" id="anthropicKeyStatus"></div></div>
+            <div class="field">
+              <label for="secret-anthropic_api_key">API key</label>
+              <input type="password" id="secret-anthropic_api_key" data-secret="anthropic_api_key" data-env="ANTHROPIC_API_KEY" data-noun="key" autocomplete="new-password" spellcheck="false">
+              <div class="secret-note">
+                <span data-secret-status="anthropic_api_key"></span>
+                <button class="link" data-secret-clear="anthropic_api_key" hidden>Remove saved key</button>
+              </div>
+            </div>
           </div>
           <div data-provider="gemini">
             <div class="field"><label>Gemini model</label><input type="text" data-key="gemini_model" list="geminiModels" autocomplete="off"><datalist id="geminiModels"></datalist><div class="hint" data-hint="gemini_model"></div></div>
-            <div class="field"><label>API key</label><div class="secret-status" id="geminiKeyStatus"></div></div>
+            <div class="field">
+              <label for="secret-gemini_api_key">API key</label>
+              <input type="password" id="secret-gemini_api_key" data-secret="gemini_api_key" data-env="GEMINI_API_KEY" data-noun="key" autocomplete="new-password" spellcheck="false">
+              <div class="secret-note">
+                <span data-secret-status="gemini_api_key"></span>
+                <button class="link" data-secret-clear="gemini_api_key" hidden>Remove saved key</button>
+              </div>
+            </div>
           </div>
           <div class="test-row">
             <button class="small" id="btnTestLlm">Test connection</button>
@@ -170,11 +184,11 @@
           </div>
           <div class="field"><label>Username</label><input type="text" data-key="smtp_user" autocomplete="off"><div class="hint" data-hint="smtp_user"></div></div>
           <div class="field">
-            <label for="smtpPass">Password</label>
-            <input type="password" id="smtpPass" autocomplete="new-password" spellcheck="false">
+            <label for="secret-smtp_pass">Password</label>
+            <input type="password" id="secret-smtp_pass" data-secret="smtp_pass" data-env="SMTP_PASS" data-noun="password" autocomplete="new-password" spellcheck="false">
             <div class="secret-note">
-              <span id="smtpPassStatus"></span>
-              <button class="link" id="btnClearSmtpPass" hidden>Remove saved password</button>
+              <span data-secret-status="smtp_pass"></span>
+              <button class="link" data-secret-clear="smtp_pass" hidden>Remove saved password</button>
             </div>
           </div>
           <div class="field"><label>From address</label><input type="email" data-key="smtp_from" placeholder="proposals@example.com"><div class="hint" data-hint="smtp_from"></div></div>
