@@ -1,4 +1,4 @@
-"""LLM client supporting Anthropic (cloud) and Ollama (self-hosted)."""
+"""LLM client supporting Anthropic and Google Gemini (cloud) and Ollama (self-hosted)."""
 
 import json
 from typing import AsyncIterator, Dict, List
@@ -118,6 +118,63 @@ async def _stream_ollama(messages: List[Dict], system: str, cfg: Settings) -> As
         raise LLMError(f"Could not reach Ollama at {url}: {e}") from e
 
 
+# ---------- Gemini ----------
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def _gemini_model_path(model: str) -> str:
+    # The models API lists names as "models/gemini-..."; accept either form.
+    return model if model.startswith("models/") else f"models/{model}"
+
+
+def _gemini_error(status: int, body: bytes) -> str:
+    try:
+        detail = json.loads(body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        detail = body.decode(errors="ignore")[:300]
+    if status in (400, 403) and "API key" in detail:
+        return f"Gemini rejected the API key: {detail}"
+    return f"Gemini error {status}: {detail}"
+
+
+async def _stream_gemini(messages: List[Dict], system: str, cfg: Settings) -> AsyncIterator[str]:
+    if not cfg.GEMINI_API_KEY:
+        raise LLMError("GEMINI_API_KEY is not set.")
+    payload = {
+        "system_instruction": {"parts": [{"text": system}]},
+        # Gemini calls the assistant role "model".
+        "contents": [
+            {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+            for m in messages
+        ],
+    }
+    url = f"{GEMINI_API_BASE}/{_gemini_model_path(cfg.GEMINI_MODEL)}:streamGenerateContent"
+    timeout = httpx.Timeout(120.0, connect=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "POST", url, params={"alt": "sse"}, json=payload,
+                headers={"x-goog-api-key": cfg.GEMINI_API_KEY},
+            ) as r:
+                if r.status_code != 200:
+                    raise LLMError(_gemini_error(r.status_code, await r.aread()))
+                async for line in r.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        chunk = json.loads(line[5:])
+                    except json.JSONDecodeError:
+                        continue
+                    if (blocked := (chunk.get("promptFeedback") or {}).get("blockReason")):
+                        raise LLMError(f"Gemini blocked the request ({blocked}).")
+                    for cand in (chunk.get("candidates") or [])[:1]:
+                        for part in (cand.get("content") or {}).get("parts") or []:
+                            if part.get("text") and not part.get("thought"):
+                                yield part["text"]
+    except httpx.HTTPError as e:
+        raise LLMError(f"Could not reach the Gemini API: {e}") from e
+
+
 # ---------- Model discovery ----------
 async def list_ollama_models(base_url: str) -> List[str]:
     url = f"{base_url.rstrip('/')}/api/tags"
@@ -153,6 +210,32 @@ async def list_anthropic_models(api_key: str) -> List[str]:
     return [m["id"] for m in r.json().get("data", [])]
 
 
+async def list_gemini_models(api_key: str) -> List[str]:
+    if not api_key:
+        raise LLMError("GEMINI_API_KEY is not set.")
+    names: List[str] = []
+    page_token = None
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            for _ in range(10):  # paginated; a handful of pages at most
+                params = {"pageSize": 1000}
+                if page_token:
+                    params["pageToken"] = page_token
+                r = await client.get(f"{GEMINI_API_BASE}/models", params=params, headers={"x-goog-api-key": api_key})
+                if r.status_code != 200:
+                    raise LLMError(_gemini_error(r.status_code, r.content))
+                data = r.json()
+                for m in data.get("models", []):
+                    if "generateContent" in m.get("supportedGenerationMethods", []):
+                        names.append(m["name"].removeprefix("models/"))
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+    except httpx.HTTPError as e:
+        raise LLMError(f"Could not reach the Gemini API: {e}") from e
+    return sorted(names)
+
+
 # ---------- Public ----------
 async def stream_chat(messages: List[Dict], system: str) -> AsyncIterator[str]:
     cfg = get_settings()
@@ -162,6 +245,9 @@ async def stream_chat(messages: List[Dict], system: str) -> AsyncIterator[str]:
             yield tok
     elif provider == "ollama":
         async for tok in _stream_ollama(messages, system, cfg):
+            yield tok
+    elif provider == "gemini":
+        async for tok in _stream_gemini(messages, system, cfg):
             yield tok
     else:
         raise LLMError(f"Unknown LLM_PROVIDER: {cfg.LLM_PROVIDER}")

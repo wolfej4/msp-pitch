@@ -11,7 +11,7 @@ Designed to run as a single container on Unraid / Portainer.
 - **Live proposal builder** — recurring (monthly/annual) and one-time line items with computed totals.
 - **PDF export** — clean, branded proposal generated with WeasyPrint.
 - **SMTP send** — email the PDF directly from the app.
-- **LLM choice** — Anthropic API or local Ollama. Supports streaming responses.
+- **LLM choice** — Anthropic, Google Gemini, or local Ollama. Supports streaming responses.
 - **In-app settings** — change branding, AI provider/model and SMTP from the **Settings** tab, no restart needed.
 - **No external state** — SQLite file in a bind-mounted volume.
 
@@ -26,10 +26,11 @@ Designed to run as a single container on Unraid / Portainer.
    volumes:
      - /mnt/user/appdata/msp-pitch/data:/app/data
    ```
-3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. Most of them can also be changed later from the app's **Settings** tab; `ANTHROPIC_API_KEY` can only be set here. At minimum:
-   - `LLM_PROVIDER` = `ollama` or `anthropic`
+3. Add the env vars (see `.env.example`) in Portainer's "Environment variables" panel. Most of them can also be changed later from the app's **Settings** tab; the API keys (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) can only be set here. At minimum:
+   - `LLM_PROVIDER` = `ollama`, `anthropic` or `gemini`
    - If `ollama`: `OLLAMA_BASE_URL` (default uses `host.docker.internal:11434`) and `OLLAMA_MODEL`
    - If `anthropic`: `ANTHROPIC_API_KEY`
+   - If `gemini`: `GEMINI_API_KEY`
 4. **Build & deploy.** Browse to `http://<your-host>:8080`.
 
 To put it behind Nginx Proxy Manager (or any reverse proxy), point a proxy host at the container on port `8000` (internally) or `8080` (via host).
@@ -49,13 +50,16 @@ Branding, the AI provider/model/Ollama URL, and SMTP host/port/user/from/TLS can
 - Values saved there are stored in `data/msp.db` and **override** the matching environment variable. Each overridden field shows the env value it's replacing.
 - **Reset to environment defaults** drops every in-app override, so the env vars apply again.
 - **Test connection** checks the provider using the values on screen (even before you save) and fills the model field with the models it finds — for Ollama, that's whatever you've pulled.
-- `ANTHROPIC_API_KEY` must be set as an environment variable; the Settings tab only shows whether it's set.
+- `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` must be set as environment variables; the Settings tab only shows whether each is set.
 - The SMTP password can be typed into Settings. It's write-only: the app never sends it back to the browser, and leaving the field blank keeps the current one. It's stored in plain text in `data/msp.db`, so protect that file (and the app itself) accordingly. **Remove saved password** falls back to `SMTP_PASS` from the environment.
 
 ## LLM options
 
 ### Anthropic
 Set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY=...`. Default model is `claude-sonnet-4-5`.
+
+### Google Gemini
+Set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY=...` (create one at https://aistudio.google.com/apikey). Default model is `gemini-3.8-flash`; **Test connection** in Settings lists every model your key can use.
 
 ### Ollama (self-hosted)
 Set `LLM_PROVIDER=ollama`. Default URL is `http://host.docker.internal:11434`, which lets the container reach Ollama running on the Unraid host (the `extra_hosts` entry in compose enables this on Linux).
@@ -95,7 +99,7 @@ msp-pitch/
     ├── database.py        # SQLAlchemy setup
     ├── models.py          # ORM models
     ├── schemas.py         # Pydantic schemas
-    ├── llm.py             # Anthropic + Ollama streaming clients
+    ├── llm.py             # Anthropic, Gemini + Ollama streaming clients
     ├── pdf_generator.py   # WeasyPrint -> PDF
     ├── email_sender.py    # aiosmtplib
     ├── services_seed.py   # default catalog

@@ -147,6 +147,7 @@ class AppSettingsUpdate(BaseModel):
     company_website: Optional[str] = None
     llm_provider: Optional[str] = None
     anthropic_model: Optional[str] = Field(None, min_length=1)
+    gemini_model: Optional[str] = Field(None, min_length=1)
     ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = Field(None, min_length=1)
     smtp_host: Optional[str] = None
@@ -163,8 +164,8 @@ class AppSettingsUpdate(BaseModel):
         if v is None:
             return v
         v = v.strip().lower()
-        if v not in ("ollama", "anthropic"):
-            raise ValueError("must be 'ollama' or 'anthropic'")
+        if v not in ("ollama", "anthropic", "gemini"):
+            raise ValueError("must be 'ollama', 'anthropic' or 'gemini'")
         return v
 
     @field_validator("ollama_base_url")
@@ -179,6 +180,6 @@ class AppSettingsUpdate(BaseModel):
 
 
 class LLMTestRequest(BaseModel):
-    provider: Literal["ollama", "anthropic"]
+    provider: Literal["ollama", "anthropic", "gemini"]
     ollama_base_url: str = ""
     model: str = ""

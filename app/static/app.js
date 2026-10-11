@@ -124,6 +124,7 @@ const DEFAULT_LOGO = "/static/img/logo-mark.png";
 
 function refreshHeaderLogo(hasLogo) {
   const src = hasLogo ? `/api/logo?t=${Date.now()}` : null;
+  $("#favicon").href = `/favicon.png?t=${Date.now()}`;
   // The header falls back to the SwyfTech mark; the Settings preview shows only an uploaded logo.
   $("#brandLogo").src = src || DEFAULT_LOGO;
   const preview = $("#settingsLogo");
@@ -456,6 +457,13 @@ async function sendChat(message) {
   }
 }
 
+// Enter sends; Shift+Enter adds a new line. Skip while an IME is composing (e.g. accented input).
+$("#chatInput").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  if (!$("#chatSubmitBtn").disabled) $("#chatForm").requestSubmit();
+});
+
 $("#chatForm").onsubmit = async (e) => {
   e.preventDefault();
   const input = $("#chatInput");
@@ -554,23 +562,36 @@ function renderCatalogQuick() {
   const filtered = state.services.filter((s) => {
     if (cat && s.category !== cat) return false;
     if (!text) return true;
-    return s.name.toLowerCase().includes(text) || (s.category || "").toLowerCase().includes(text);
+    return (
+      s.name.toLowerCase().includes(text) ||
+      (s.category || "").toLowerCase().includes(text) ||
+      (s.description || "").toLowerCase().includes(text)
+    );
   });
   if (filtered.length === 0) {
     wrap.innerHTML = '<div class="empty-state" style="padding:20px;">No matching services.</div>';
     return;
   }
+  const inProposal = new Set(state.proposalItems.map((it) => it.service_id));
   for (const s of filtered) {
     const item = document.createElement("div");
     item.className = "catalog-quick-item";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.title = `Add "${s.name}" to the proposal`;
     item.innerHTML = `
       <div>
         <div class="cat-tag">${escapeHtml(s.category)}</div>
         <div class="name">${escapeHtml(s.name)}</div>
+        ${s.description ? `<div class="desc">${escapeHtml(s.description)}</div>` : ""}
       </div>
-      <div class="price">${fmtPrice(s)}</div>
+      <div class="side">
+        <div class="price">${fmtPrice(s)}</div>
+        ${inProposal.has(s.id) ? '<span class="added">In proposal</span>' : '<span class="add">+ Add</span>'}
+      </div>
     `;
     item.onclick = () => addServiceToProposal(s.id);
+    item.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addServiceToProposal(s.id); } };
     wrap.appendChild(item);
   }
 }
@@ -755,11 +776,13 @@ function renderProposal() {
   wrap.innerHTML = "";
   $("#proposalCount").textContent = `${state.proposalItems.length} item${state.proposalItems.length === 1 ? "" : "s"}`;
 
+  if (state.activeProspectId) renderCatalogQuick();  // refresh "In proposal" markers
   if (state.proposalItems.length === 0) {
-    wrap.innerHTML = '<div class="empty-state" style="padding:20px;">Click services from the catalog below or ask the AI to suggest some.</div>';
+    wrap.innerHTML = '<div class="empty-state" style="padding:20px;">Click services in the catalog or ask the AI to suggest some.</div>';
     renderTotals();
     return;
   }
+  wrap.insertAdjacentHTML("beforeend", '<div class="proposal-cols"><span>Qty</span><span>Price</span><span>Billing</span><span>Total</span></div>');
 
   for (const it of state.proposalItems) {
     const div = document.createElement("div");
@@ -899,6 +922,7 @@ function renderSettings() {
     hint.textContent = `Overrides environment value: ${env === "" ? "(blank)" : env}`;
   }
   setSecretStatus($("#anthropicKeyStatus"), secrets.anthropic_api_key_set, "ANTHROPIC_API_KEY");
+  setSecretStatus($("#geminiKeyStatus"), secrets.gemini_api_key_set, "GEMINI_API_KEY");
   renderSmtpPassStatus(secrets.smtp_pass_source);
   syncProviderFields();
 }
@@ -991,6 +1015,7 @@ async function saveSettings() {
   if ("company_name" in changed && !changed.company_name) problems.push("Company name is required");
   if ("ollama_model" in changed && !changed.ollama_model) problems.push("Ollama model can't be blank");
   if ("anthropic_model" in changed && !changed.anthropic_model) problems.push("Anthropic model can't be blank");
+  if ("gemini_model" in changed && !changed.gemini_model) problems.push("Gemini model can't be blank");
   if ("ollama_base_url" in changed && !changed.ollama_base_url) problems.push("Ollama URL can't be blank");
   if ("smtp_port" in changed && !(changed.smtp_port >= 1 && changed.smtp_port <= 65535)) problems.push("SMTP port must be between 1 and 65535");
   if (problems.length) { setSettingsStatus(problems.join("; "), "error"); return; }
@@ -1023,7 +1048,7 @@ async function resetSettings() {
 async function testLlm() {
   const data = readSettingsForm();
   const provider = data.llm_provider;
-  const model = provider === "ollama" ? data.ollama_model : data.anthropic_model;
+  const model = data[`${provider}_model`];
   const out = $("#llmTestResult");
   out.className = "test-result muted";
   out.textContent = "Testing…";
@@ -1038,7 +1063,7 @@ async function testLlm() {
       out.textContent = res.error;
       return;
     }
-    const list = $(provider === "ollama" ? "#ollamaModels" : "#anthropicModels");
+    const list = $(`#${provider}Models`);
     list.innerHTML = res.models.map((m) => `<option value="${escapeAttr(m)}"></option>`).join("");
     const count = `${res.models.length} model${res.models.length === 1 ? "" : "s"} available`;
     if (res.model_found === false) {

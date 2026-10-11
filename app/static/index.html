@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SwyfTech Pitch</title>
-<link rel="icon" href="/static/img/logo-mark.png">
+<link rel="icon" id="favicon" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
 <link rel="preload" href="/static/fonts/plus-jakarta-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -56,32 +57,27 @@
         </div>
         <div id="chatLog" class="chat-log"></div>
         <form id="chatForm" class="chat-form">
-          <textarea id="chatInput" placeholder="Ask the AI to suggest services, run discovery, or help you decide what to offer..." rows="3"></textarea>
+          <textarea id="chatInput" placeholder="Ask the AI to suggest services, run discovery, or help you decide what to offer… (Enter to send, Shift+Enter for a new line)" rows="3"></textarea>
           <button type="submit" class="primary" id="chatSubmitBtn">Send</button>
         </form>
       </div>
 
-      <!-- Right column: catalog + proposal -->
-      <div class="right-column">
-
-        <div class="panel">
-          <div class="panel-header">
-            <h2>Proposal</h2>
-            <span class="muted" id="proposalCount">0 items</span>
-          </div>
-          <div id="proposalItems" class="proposal-items"></div>
-          <div id="proposalTotals" class="proposal-totals"></div>
+      <div class="panel proposal-panel">
+        <div class="panel-header">
+          <h2>Proposal</h2>
+          <span class="muted" id="proposalCount">0 items</span>
         </div>
+        <div id="proposalItems" class="proposal-items"></div>
+        <div id="proposalTotals" class="proposal-totals"></div>
+      </div>
 
-        <div class="panel">
-          <div class="panel-header">
-            <h2>Add From Catalog</h2>
-            <input type="text" id="catalogFilter" placeholder="Filter..." class="filter-input">
-            <select id="catalogQuickCategory" class="filter-input"></select>
-          </div>
-          <div id="catalogQuickList" class="catalog-quick"></div>
+      <div class="panel catalog-panel">
+        <div class="panel-header">
+          <h2>Add From Catalog</h2>
+          <input type="text" id="catalogFilter" placeholder="Filter…" class="filter-input">
+          <select id="catalogQuickCategory" class="filter-input"></select>
         </div>
-
+        <div id="catalogQuickList" class="catalog-quick"></div>
       </div>
     </div>
   </section>
@@ -112,7 +108,7 @@
     </div>
     <p class="muted settings-intro">
       Changes take effect immediately — no restart needed. Anything you save here overrides the matching
-      environment variable. The Anthropic API key can only be set with an environment variable, and a saved SMTP password is never shown again.
+      environment variable. API keys (Anthropic, Gemini) can only be set with environment variables, and a saved SMTP password is never shown again.
     </p>
 
     <div class="settings-grid">
@@ -142,6 +138,7 @@
             <select data-key="llm_provider">
               <option value="ollama">Ollama (self-hosted)</option>
               <option value="anthropic">Anthropic (cloud)</option>
+              <option value="gemini">Google Gemini (cloud)</option>
             </select>
             <div class="hint" data-hint="llm_provider"></div>
           </div>
@@ -152,6 +149,10 @@
           <div data-provider="anthropic">
             <div class="field"><label>Anthropic model</label><input type="text" data-key="anthropic_model" list="anthropicModels" autocomplete="off"><datalist id="anthropicModels"></datalist><div class="hint" data-hint="anthropic_model"></div></div>
             <div class="field"><label>API key</label><div class="secret-status" id="anthropicKeyStatus"></div></div>
+          </div>
+          <div data-provider="gemini">
+            <div class="field"><label>Gemini model</label><input type="text" data-key="gemini_model" list="geminiModels" autocomplete="off"><datalist id="geminiModels"></datalist><div class="hint" data-hint="gemini_model"></div></div>
+            <div class="field"><label>API key</label><div class="secret-status" id="geminiKeyStatus"></div></div>
           </div>
           <div class="test-row">
             <button class="small" id="btnTestLlm">Test connection</button>

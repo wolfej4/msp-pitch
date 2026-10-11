@@ -1,6 +1,7 @@
 """Settings editable from the UI, layered over the env-driven defaults in config.py.
 
-ANTHROPIC_API_KEY is deliberately not editable here; it only comes from the environment.
+API keys (ANTHROPIC_API_KEY, GEMINI_API_KEY) are deliberately not editable here; they only
+come from the environment.
 SMTP_PASS can be saved here, but is write-only: it's never returned to the browser."""
 
 import json
@@ -18,6 +19,7 @@ EDITABLE_KEYS = (
     "COMPANY_WEBSITE",
     "LLM_PROVIDER",
     "ANTHROPIC_MODEL",
+    "GEMINI_MODEL",
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
     "SMTP_HOST",

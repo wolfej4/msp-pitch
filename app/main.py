@@ -16,7 +16,7 @@ from . import models, schemas
 from .config import DATA_DIR, LOGO_EXTS, find_logo_path, normalize_url
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
-from .llm import LLMError, build_system_prompt, list_anthropic_models, list_ollama_models, stream_chat
+from .llm import LLMError, build_system_prompt, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
 from .runtime_settings import EDITABLE_KEYS, SECRET_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
@@ -111,7 +111,10 @@ def get_config():
         "company_phone": settings.COMPANY_PHONE,
         "company_website": settings.COMPANY_WEBSITE,
         "llm_provider": settings.LLM_PROVIDER,
-        "llm_model": settings.ANTHROPIC_MODEL if settings.LLM_PROVIDER == "anthropic" else settings.OLLAMA_MODEL,
+        "llm_model": {
+            "anthropic": settings.ANTHROPIC_MODEL,
+            "gemini": settings.GEMINI_MODEL,
+        }.get(settings.LLM_PROVIDER, settings.OLLAMA_MODEL),
         "smtp_configured": bool(settings.SMTP_HOST and settings.SMTP_FROM),
         "has_logo": find_logo_path() is not None,
     }
@@ -128,6 +131,7 @@ def _settings_payload():
         # Secrets are never returned; only whether each is set, and where from.
         "secrets": {
             "anthropic_api_key_set": bool(effective.ANTHROPIC_API_KEY),
+            "gemini_api_key_set": bool(effective.GEMINI_API_KEY),
             "smtp_pass_source": "app" if "SMTP_PASS" in overrides else ("env" if effective.SMTP_PASS else None),
         },
     }
@@ -142,7 +146,7 @@ def get_app_settings():
 def update_app_settings(payload: schemas.AppSettingsUpdate):
     values = {k.upper(): v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     for k in ("COMPANY_NAME", "COMPANY_TAGLINE", "COMPANY_EMAIL", "COMPANY_PHONE", "COMPANY_WEBSITE",
-              "ANTHROPIC_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
+              "ANTHROPIC_MODEL", "GEMINI_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "SMTP_HOST", "SMTP_USER", "SMTP_FROM"):
         if k in values:
             values[k] = values[k].strip()
     save_settings(values)
@@ -164,6 +168,8 @@ async def test_llm(payload: schemas.LLMTestRequest):
             if not base_url.startswith(("http://", "https://")):
                 raise HTTPException(400, "Ollama URL must start with http:// or https://")
             models = await list_ollama_models(base_url)
+        elif payload.provider == "gemini":
+            models = await list_gemini_models(get_settings().GEMINI_API_KEY)
         else:
             models = await list_anthropic_models(get_settings().ANTHROPIC_API_KEY)
     except LLMError as e:
@@ -172,7 +178,10 @@ async def test_llm(payload: schemas.LLMTestRequest):
     found = None
     if model:
         # Ollama treats a bare name as ":latest"
-        candidates = {model, f"{model}:latest"} if payload.provider == "ollama" else {model}
+        if payload.provider == "ollama":
+            candidates = {model, f"{model}:latest"}
+        else:
+            candidates = {model.removeprefix("models/")}
         found = any(m in candidates for m in models)
     return {"ok": True, "models": models, "model_found": found}
 
@@ -624,6 +633,13 @@ INDEX_HTML = _render_index()
 @app.get("/")
 def index():
     return HTMLResponse(INDEX_HTML)
+
+
+@app.get("/favicon.png")
+@app.get("/favicon.ico")
+def favicon():
+    """The uploaded logo if there is one, otherwise the SwyfTech bird mark."""
+    return FileResponse(str(find_logo_path() or STATIC_DIR / "img" / "logo-mark.png"))
 
 
 @app.get("/healthz")
