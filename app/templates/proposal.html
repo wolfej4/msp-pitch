@@ -77,7 +77,8 @@
     {% if prospect.email %}<div><div class="label">Email</div>{{ prospect.email }}</div>{% endif %}
     {% if prospect.phone %}<div><div class="label">Phone</div>{{ prospect.phone }}</div>{% endif %}
     {% if prospect.industry %}<div><div class="label">Industry</div>{{ prospect.industry }}</div>{% endif %}
-    {% if prospect.headcount %}<div><div class="label">Headcount</div>{{ prospect.headcount }}</div>{% endif %}
+    {% if prospect.users is not none %}<div><div class="label">Users</div>{{ prospect.users }}</div>{% endif %}
+    {% if prospect.endpoints is not none %}<div><div class="label">Endpoints</div>{{ prospect.endpoints }}</div>{% endif %}
   </div>
 </div>
 

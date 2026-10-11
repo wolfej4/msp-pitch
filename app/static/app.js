@@ -214,6 +214,7 @@ function renderProspects() {
       <h3>${escapeHtml(p.company_name)}</h3>
       <div class="meta">${escapeHtml(p.contact_name || "—")}${p.industry ? " · " + escapeHtml(p.industry) : ""}</div>
       <div class="stats">
+        ${countsSummary(p) ? `<span>${countsSummary(p)}</span>` : ""}
         <span>Updated ${new Date(p.updated_at).toLocaleDateString()}</span>
       </div>
     `;
@@ -244,7 +245,7 @@ function newProspectModal() {
       <div class="field"><label>Email</label><input type="email" id="f_email"></div>
       <div class="field"><label>Phone</label><input type="tel" id="f_phone"></div>
     </div>
-    <div class="field"><label>Headcount</label><input type="text" id="f_headcount" placeholder="e.g. 15 users, 25 endpoints"></div>
+    ${countFields()}
     <div class="field"><label>Notes</label><textarea id="f_notes" rows="3"></textarea></div>
   `;
   openModal({
@@ -258,13 +259,14 @@ function newProspectModal() {
         onClick: async () => {
           const company = $("#f_company", form).value.trim();
           if (!company) { toast("Company name is required", true); return; }
+          if (!readCounts(form)) return;
           const data = {
             company_name: company,
             contact_name: $("#f_contact", form).value.trim(),
             industry: $("#f_industry", form).value.trim(),
             email: $("#f_email", form).value.trim(),
             phone: $("#f_phone", form).value.trim(),
-            headcount: $("#f_headcount", form).value.trim(),
+            ...readCounts(form),
             notes: $("#f_notes", form).value.trim(),
           };
           const created = await api("/api/prospects", { method: "POST", body: JSON.stringify(data) });
@@ -275,6 +277,36 @@ function newProspectModal() {
       },
     ],
   });
+}
+
+function countFields(p = {}) {
+  const v = (n) => (n == null ? "" : n);
+  return `
+    <div class="field-row">
+      <div class="field"><label>Users</label><input type="number" min="0" step="1" id="f_users" value="${v(p.users)}" placeholder="e.g. 15"></div>
+      <div class="field"><label>Endpoints</label><input type="number" min="0" step="1" id="f_endpoints" value="${v(p.endpoints)}" placeholder="e.g. 25"></div>
+    </div>
+    <div class="muted field-help">Per-user and per-endpoint/device services start at these quantities when added to the proposal.</div>`;
+}
+
+// {users, endpoints} with blank as null, or null (after a toast) if either is invalid.
+function readCounts(form) {
+  const out = {};
+  for (const key of ["users", "endpoints"]) {
+    const raw = $(`#f_${key}`, form).value.trim();
+    if (raw === "") { out[key] = null; continue; }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) { toast(`${key[0].toUpperCase() + key.slice(1)} must be a whole number`, true); return null; }
+    out[key] = n;
+  }
+  return out;
+}
+
+function countsSummary(p) {
+  const parts = [];
+  if (p.users != null) parts.push(`${p.users} user${p.users === 1 ? "" : "s"}`);
+  if (p.endpoints != null) parts.push(`${p.endpoints} endpoint${p.endpoints === 1 ? "" : "s"}`);
+  return parts.join(" · ");
 }
 
 function editProspectModal() {
@@ -290,7 +322,7 @@ function editProspectModal() {
       <div class="field"><label>Email</label><input type="email" id="f_email" value="${escapeAttr(p.email)}"></div>
       <div class="field"><label>Phone</label><input type="tel" id="f_phone" value="${escapeAttr(p.phone)}"></div>
     </div>
-    <div class="field"><label>Headcount</label><input type="text" id="f_headcount" value="${escapeAttr(p.headcount)}"></div>
+    ${countFields(p)}
     <div class="field"><label>Notes (also shown as "Discussion Summary" on PDF)</label><textarea id="f_notes" rows="4">${escapeHtml(p.notes)}</textarea></div>
   `;
   openModal({
@@ -302,13 +334,14 @@ function editProspectModal() {
         label: "Save",
         primary: true,
         onClick: async () => {
+          if (!readCounts(form)) return;
           const data = {
             company_name: $("#f_company", form).value.trim(),
             contact_name: $("#f_contact", form).value.trim(),
             industry: $("#f_industry", form).value.trim(),
             email: $("#f_email", form).value.trim(),
             phone: $("#f_phone", form).value.trim(),
-            headcount: $("#f_headcount", form).value.trim(),
+            ...readCounts(form),
             notes: $("#f_notes", form).value.trim(),
           };
           await api(`/api/prospects/${p.id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -325,6 +358,7 @@ async function openProspect(id) {
   state.activeProspectId = id;
   state.activeProspect = await api(`/api/prospects/${id}`);
   $("#activeProspectName").textContent = state.activeProspect.company_name;
+  $("#activeProspectCounts").textContent = countsSummary(state.activeProspect);
   showView("active");
   await Promise.all([loadProposalItems(), loadMessages(), renderCatalogQuick()]);
 }

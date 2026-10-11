@@ -15,7 +15,9 @@ class Prospect(Base):
     email = Column(String, default="")
     phone = Column(String, default="")
     industry = Column(String, default="")
-    headcount = Column(String, default="")
+    headcount = Column(String, default="")  # legacy free text; split into users/endpoints at startup
+    users = Column(Integer, nullable=True)
+    endpoints = Column(Integer, nullable=True)
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

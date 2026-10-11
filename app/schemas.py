@@ -14,7 +14,8 @@ class ProspectBase(BaseModel):
     email: str = ""
     phone: str = ""
     industry: str = ""
-    headcount: str = ""
+    users: Optional[int] = Field(None, ge=0)
+    endpoints: Optional[int] = Field(None, ge=0)
     notes: str = ""
 
 
@@ -28,7 +29,8 @@ class ProspectUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     industry: Optional[str] = None
-    headcount: Optional[str] = None
+    users: Optional[int] = Field(None, ge=0)
+    endpoints: Optional[int] = Field(None, ge=0)
     notes: Optional[str] = None
 
 

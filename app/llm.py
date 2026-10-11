@@ -10,6 +10,10 @@ from .config import Settings
 from .runtime_settings import get_settings
 
 
+def _count(n) -> str:
+    return "—" if n is None else str(n)
+
+
 def build_system_prompt(prospect: Dict, services: List[Dict], company: Dict) -> str:
     """Compose a system prompt that grounds the model in this MSP's catalog
     and the active prospect's context."""
@@ -35,7 +39,8 @@ def build_system_prompt(prospect: Dict, services: List[Dict], company: Dict) -> 
         f"Company: {prospect.get('company_name', 'Unknown')}\n"
         f"Contact: {prospect.get('contact_name') or '—'}\n"
         f"Industry: {prospect.get('industry') or '—'}\n"
-        f"Headcount: {prospect.get('headcount') or '—'}\n"
+        f"Users: {_count(prospect.get('users'))}\n"
+        f"Endpoints: {_count(prospect.get('endpoints'))}\n"
         f"Notes: {prospect.get('notes') or '—'}\n"
     )
 

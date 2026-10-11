@@ -1,6 +1,7 @@
 """FastAPI app: REST API + static frontend for the MSP client-pitch tool."""
 
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -8,6 +9,7 @@ from typing import List
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -49,8 +51,41 @@ def _seed_categories_if_empty():
         db.close()
 
 
+def _migrate_prospect_counts():
+    """Older databases have one free-text "headcount" field ("15 users, 25 endpoints").
+    Add the users/endpoints columns and split what can be parsed into them; anything
+    unparseable is kept by appending it to the prospect's notes."""
+    cols = {c["name"] for c in inspect(engine).get_columns("prospects")}
+    with engine.begin() as conn:
+        for col in ("users", "endpoints"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE prospects ADD COLUMN {col} INTEGER")
+
+    db: Session = next(get_db())
+    try:
+        legacy = db.query(models.Prospect).filter(models.Prospect.headcount != "", models.Prospect.headcount.isnot(None))
+        for p in legacy:
+            text = p.headcount.strip()
+            users = re.search(r"(\d+)\s*(?:users?|people|employees|staff|seats?)\b", text, re.I)
+            endpoints = re.search(r"(\d+)\s*(?:endpoints?|devices?|computers?|machines?|pcs?|workstations?)\b", text, re.I)
+            if users and p.users is None:
+                p.users = int(users.group(1))
+            if endpoints and p.endpoints is None:
+                p.endpoints = int(endpoints.group(1))
+            if not users and not endpoints:
+                if re.fullmatch(r"\d+", text) and p.users is None:
+                    p.users = int(text)  # a bare headcount number is people
+                else:
+                    p.notes = f"{p.notes}\n\nHeadcount: {text}".strip()
+            p.headcount = ""
+        db.commit()
+    finally:
+        db.close()
+
+
 _seed_services_if_empty()
 _seed_categories_if_empty()
+_migrate_prospect_counts()
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
 
@@ -342,17 +377,24 @@ def add_item(prospect_id: int, payload: schemas.ProposalItemCreate, db: Session 
 
 @app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
 def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
-    if not db.get(models.Prospect, prospect_id):
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
         raise HTTPException(404, "Prospect not found")
     svc = db.get(models.Service, service_id)
     if not svc:
         raise HTTPException(404, "Service not found")
+    # Start per-user / per-endpoint lines at the prospect's counts.
+    count = {
+        "per_user": prospect.users,
+        "per_endpoint": prospect.endpoints,
+        "per_device": prospect.endpoints,
+    }.get(svc.price_unit)
     item = models.ProposalItem(
         prospect_id=prospect_id,
         service_id=svc.id,
         name=svc.name,
         description=svc.description,
-        quantity=1.0,
+        quantity=float(count) if count else 1.0,
         price=svc.default_price,
         price_unit=svc.price_unit,
         billing_cycle=svc.billing_cycle,
@@ -431,7 +473,8 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             "company_name": prospect.company_name,
             "contact_name": prospect.contact_name,
             "industry": prospect.industry,
-            "headcount": prospect.headcount,
+            "users": prospect.users,
+            "endpoints": prospect.endpoints,
             "notes": prospect.notes,
         },
         services=[
@@ -509,7 +552,8 @@ def _load_proposal_payload(prospect_id: int, db: Session, summary_notes: str = "
         "email": prospect.email,
         "phone": prospect.phone,
         "industry": prospect.industry,
-        "headcount": prospect.headcount,
+        "users": prospect.users,
+        "endpoints": prospect.endpoints,
     }
     return prospect_dict, enriched, summary_notes or (prospect.notes or "")
 
