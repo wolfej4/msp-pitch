@@ -6,7 +6,7 @@ Designed to run as a single container on Unraid / Portainer.
 
 ## Features
 
-- **AI-assisted discovery** — chat with an LLM that knows your service catalog and the active prospect's context. The model recommends services by name; click any bolded service in chat to add it to the proposal.
+- **AI-assisted discovery** — chat with an LLM that knows your service catalog, the active prospect's context, and what's already on their proposal. Services the AI recommends are added to the proposal automatically (turn this off under Settings → AI Model); you can also click any bolded service in chat to add it.
 - **Editable service catalog** — comes pre-seeded with ~20 common MSP offerings (Foundation, Cybersecurity, Cloud, Backup, Network, VoIP, Strategic, Compliance, plus a hospitality add-on). Edit pricing/units to fit your market.
 - **Live proposal builder** — recurring (monthly/annual) and one-time line items with computed totals.
 - **PDF export** — clean, branded proposal generated with WeasyPrint.

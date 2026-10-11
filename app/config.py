@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"
     OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
+    AUTO_ADD_SERVICES: bool = True  # add services the AI recommends to the proposal automatically
 
     # SMTP
     SMTP_HOST: str = ""

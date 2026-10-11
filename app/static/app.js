@@ -373,10 +373,6 @@ async function loadMessages() {
 function renderChat() {
   const log = $("#chatLog");
   log.innerHTML = "";
-  if (state.messages.length === 0) {
-    log.innerHTML = '<div class="empty-state" style="margin: auto;">Start the discovery — ask the AI to suggest questions to ask, recommend services, or help shape your pitch.</div>';
-    return;
-  }
   for (const m of state.messages) appendMessage(m.role, m.content);
   log.scrollTop = log.scrollHeight;
 }
@@ -415,7 +411,23 @@ function renderMarkdown(text) {
   return html;
 }
 
+// The AI ends a recommending reply with a hidden "PROPOSAL_ADD: A | B" line that the server
+// acts on. Hide it here too, including a half-received one at the end while streaming.
+const PROPOSAL_MARKER = "PROPOSAL_ADD";
+const PROPOSAL_LINE_RE = /^[\s*_`>#-]*PROPOSAL_ADD[\s*_`]*[:：].*$/gim;
+
+function hideProposalMarker(text, streaming) {
+  let out = text.replace(PROPOSAL_LINE_RE, "");
+  if (streaming) {
+    const nl = out.lastIndexOf("\n");
+    const tail = out.slice(nl + 1).replace(/^[\s*_`>#-]+/, "").toUpperCase();
+    if (tail && (PROPOSAL_MARKER.startsWith(tail) || tail.startsWith(PROPOSAL_MARKER))) out = out.slice(0, nl + 1);
+  }
+  return out.trimEnd();
+}
+
 async function sendChat(message) {
+  const before = new Set(state.proposalItems.map((it) => it.id));
   appendMessage("user", message);
   const assistantDiv = appendMessage("assistant", "");
   const cursor = '<span class="streaming-cursor">▍</span>';
@@ -436,10 +448,10 @@ async function sendChat(message) {
       const { value, done } = await reader.read();
       if (done) break;
       fullText += decoder.decode(value, { stream: true });
-      assistantDiv.innerHTML = renderMarkdown(fullText) + cursor;
+      assistantDiv.innerHTML = renderMarkdown(hideProposalMarker(fullText, true)) + cursor;
       $("#chatLog").scrollTop = $("#chatLog").scrollHeight;
     }
-    assistantDiv.innerHTML = renderMarkdown(fullText);
+    assistantDiv.innerHTML = renderMarkdown(hideProposalMarker(fullText, false));
     // wire bolded service names
     $$("strong", assistantDiv).forEach((s) => {
       const name = s.textContent.trim();
@@ -449,6 +461,10 @@ async function sendChat(message) {
         s.onclick = () => addServiceToProposal(svc.id);
       }
     });
+    // Pick up anything the server auto-added from this reply.
+    await loadProposalItems();
+    const added = state.proposalItems.filter((it) => !before.has(it.id)).map((it) => it.name);
+    if (added.length) toast(`Added to proposal: ${added.join(", ")}`);
   } catch (e) {
     assistantDiv.innerHTML = `<em style="color:var(--danger)">Error: ${escapeHtml(e.message)}</em>`;
     toast("Chat failed: " + e.message, true);

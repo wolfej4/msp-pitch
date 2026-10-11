@@ -16,7 +16,7 @@ from . import models, schemas
 from .config import DATA_DIR, LOGO_EXTS, find_logo_path, normalize_url
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
-from .llm import LLMError, build_system_prompt, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
+from .llm import LLMError, build_system_prompt, extract_proposal_adds, list_anthropic_models, list_gemini_models, list_ollama_models, stream_chat
 from .pdf_generator import render_proposal_pdf
 from .runtime_settings import EDITABLE_KEYS, SECRET_KEYS, env_defaults, get_settings, load_overrides, reset_settings, save_settings
 from .services_seed import DEFAULT_SERVICES
@@ -387,14 +387,7 @@ def add_item(prospect_id: int, payload: schemas.ProposalItemCreate, db: Session 
     return item
 
 
-@app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
-def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
-    prospect = db.get(models.Prospect, prospect_id)
-    if not prospect:
-        raise HTTPException(404, "Prospect not found")
-    svc = db.get(models.Service, service_id)
-    if not svc:
-        raise HTTPException(404, "Service not found")
+def _add_service_item(db: Session, prospect: models.Prospect, svc: models.Service) -> models.ProposalItem:
     # Start per-user / per-endpoint lines at the prospect's counts.
     count = {
         "per_user": prospect.users,
@@ -402,7 +395,7 @@ def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depen
         "per_device": prospect.endpoints,
     }.get(svc.price_unit)
     item = models.ProposalItem(
-        prospect_id=prospect_id,
+        prospect_id=prospect.id,
         service_id=svc.id,
         name=svc.name,
         description=svc.description,
@@ -412,6 +405,41 @@ def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depen
         billing_cycle=svc.billing_cycle,
     )
     db.add(item)
+    return item
+
+
+def _auto_add_services(prospect_id: int, names: List[str]) -> None:
+    """Add the services the model listed in PROPOSAL_ADD, skipping unknown names and ones
+    already on the proposal."""
+    if not names:
+        return
+    db: Session = next(get_db())
+    try:
+        prospect = db.get(models.Prospect, prospect_id)
+        if not prospect:
+            return
+        norm = lambda s: " ".join(s.lower().replace("–", "-").replace("—", "-").split())
+        by_name = {norm(s.name): s for s in db.query(models.Service).filter_by(is_active=1)}
+        present = {row[0] for row in db.query(models.ProposalItem.service_id).filter_by(prospect_id=prospect_id)}
+        for name in names:
+            svc = by_name.get(norm(name))
+            if svc and svc.id not in present:
+                _add_service_item(db, prospect, svc)
+                present.add(svc.id)
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.post("/api/prospects/{prospect_id}/items/from-service/{service_id}", response_model=schemas.ProposalItemOut)
+def add_item_from_service(prospect_id: int, service_id: int, db: Session = Depends(get_db)):
+    prospect = db.get(models.Prospect, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    svc = db.get(models.Service, service_id)
+    if not svc:
+        raise HTTPException(404, "Service not found")
+    item = _add_service_item(db, prospect, svc)
     db.commit()
     db.refresh(item)
     return item
@@ -480,6 +508,9 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
     )
 
     cfg = get_settings()
+    proposal_names = [
+        it.name for it in db.query(models.ProposalItem).filter_by(prospect_id=prospect_id).order_by(models.ProposalItem.id)
+    ]
     system_prompt = build_system_prompt(
         prospect={
             "company_name": prospect.company_name,
@@ -501,6 +532,8 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             for s in services
         ],
         company={"name": cfg.COMPANY_NAME, "tagline": cfg.COMPANY_TAGLINE},
+        proposal_items=proposal_names,
+        auto_add=cfg.AUTO_ADD_SERVICES,
     )
 
     chat_messages = [{"role": m.role, "content": m.content} for m in history if m.role in ("user", "assistant")]
@@ -516,8 +549,10 @@ async def chat(prospect_id: int, payload: schemas.ChatRequest, db: Session = Dep
             full.append(err)
             yield err
         finally:
-            # Save assistant message after stream ends
-            content = "".join(full).strip()
+            # Save the reply without its hidden PROPOSAL_ADD line, then act on that line.
+            content, names = extract_proposal_adds("".join(full))
+            if cfg.AUTO_ADD_SERVICES:
+                _auto_add_services(prospect_id, names)
             if content:
                 db2: Session = next(get_db())
                 try:

@@ -148,6 +148,7 @@ class AppSettingsUpdate(BaseModel):
     llm_provider: Optional[str] = None
     anthropic_model: Optional[str] = Field(None, min_length=1)
     gemini_model: Optional[str] = Field(None, min_length=1)
+    auto_add_services: Optional[bool] = None
     ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = Field(None, min_length=1)
     smtp_host: Optional[str] = None
