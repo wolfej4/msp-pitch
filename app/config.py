@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DATA_DIR = Path("/app/data")
@@ -12,6 +13,14 @@ def find_logo_path() -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def normalize_url(v: str) -> str:
+    """Accept "192.168.1.50:11434" as well as "http://192.168.1.50:11434/"."""
+    v = v.strip().rstrip("/")
+    if v and "://" not in v:
+        v = "http://" + v
+    return v
 
 
 class Settings(BaseSettings):
@@ -41,6 +50,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:////app/data/msp.db"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("LLM_PROVIDER")
+    @classmethod
+    def _normalize_provider(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("OLLAMA_BASE_URL")
+    @classmethod
+    def _normalize_ollama_url(cls, v: str) -> str:
+        return normalize_url(v)
 
 
 settings = Settings()

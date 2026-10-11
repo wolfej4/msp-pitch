@@ -4,41 +4,49 @@
 <meta charset="UTF-8">
 <title>Proposal — {{ prospect.company_name }}</title>
 <style>
+  /* Brand tokens match swyftech-site / swyftech-crm. Fonts resolve against app/static (see pdf_generator). */
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 400; src: url("fonts/plus-jakarta-sans-latin-400-normal.woff2"); }
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 600; src: url("fonts/plus-jakarta-sans-latin-600-normal.woff2"); }
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 700; src: url("fonts/plus-jakarta-sans-latin-700-normal.woff2"); }
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 800; src: url("fonts/plus-jakarta-sans-latin-800-normal.woff2"); }
   @page {
     size: Letter;
     margin: 0.75in;
-    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #888; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: "Plus Jakarta Sans", sans-serif; font-size: 8.5pt; color: #56667D; }
   }
-  body { font-family: 'Liberation Sans', Helvetica, Arial, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.45; }
-  h1, h2, h3 { color: #0f172a; margin: 0; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2563eb; padding-bottom: 14px; margin-bottom: 28px; }
-  .brand-block { display: flex; align-items: center; gap: 14px; }
-  .brand-logo { max-height: 56px; max-width: 180px; object-fit: contain; }
-  .brand { font-size: 22pt; font-weight: 700; color: #2563eb; line-height: 1.1; }
-  .tagline { color: #64748b; font-size: 10pt; margin-top: 2px; }
-  .meta { text-align: right; font-size: 9.5pt; color: #475569; }
-  .proposal-title { font-size: 18pt; font-weight: 600; margin-bottom: 4px; }
-  .prospect-card { background: #f1f5f9; border-radius: 6px; padding: 14px 18px; margin-bottom: 22px; }
-  .prospect-card .label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
-  .prospect-card .value { font-size: 11pt; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
-  .prospect-card .row { display: flex; gap: 36px; margin-top: 6px; flex-wrap: wrap; }
+  body { font-family: "Plus Jakarta Sans", "Liberation Sans", Helvetica, Arial, sans-serif; color: #0F1B2D; font-size: 10pt; line-height: 1.5; }
+  h1, h2, h3 { color: #0A1626; margin: 0; letter-spacing: -0.01em; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1E6BFF; padding-bottom: 14px; margin-bottom: 26px; }
+  .brand-block { display: flex; align-items: center; }
+  .brand-logo { max-height: 60px; max-width: 180px; object-fit: contain; margin-right: 14px; }
+  .brand { font-size: 21pt; font-weight: 800; color: #0A1626; line-height: 1.1; letter-spacing: -0.02em; }
+  .tagline { color: #56667D; font-size: 9.5pt; margin-top: 2px; }
+  .meta { text-align: right; font-size: 9pt; color: #56667D; line-height: 1.6; }
+  .proposal-title { font-size: 19pt; font-weight: 800; color: #0A1626; letter-spacing: -0.02em; margin-bottom: 2px; }
+  .prepared-on { color: #56667D; margin-bottom: 18px; }
+  .prospect-card { background: #F4F7FB; border: 1px solid #E2E8F1; border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; }
+  .prospect-card .label { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #56667D; }
+  .prospect-card .value { font-size: 12pt; font-weight: 700; color: #0A1626; margin-bottom: 4px; }
+  .prospect-card .row { display: flex; margin-top: 6px; flex-wrap: wrap; }
+  .prospect-card .row > div { margin-right: 32px; }
   section { margin-bottom: 24px; }
-  section h2 { font-size: 13pt; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 10px; }
-  .summary { background: #fefce8; border-left: 3px solid #eab308; padding: 10px 14px; border-radius: 4px; white-space: pre-wrap; }
+  section h2 { font-size: 12.5pt; font-weight: 700; border-bottom: 1px solid #E2E8F1; padding-bottom: 5px; margin-bottom: 10px; }
+  .summary { background: #F4F7FB; border-left: 3px solid #2FA8FF; padding: 10px 14px; border-radius: 0 8px 8px 0; white-space: pre-wrap; }
   table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; background: #f8fafc; padding: 8px 10px; border-bottom: 2px solid #cbd5e1; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
-  td { padding: 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  td.desc { color: #475569; font-size: 9.5pt; }
-  .category-row td { background: #eff6ff; color: #1e40af; font-weight: 600; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; }
+  th { text-align: left; background: #F8FAFD; padding: 8px 10px; border-bottom: 1px solid #E2E8F1; font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #56667D; }
+  td { padding: 9px 10px; border-bottom: 1px solid #E2E8F1; vertical-align: top; }
+  th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.desc, .desc { color: #56667D; font-size: 9pt; }
+  .category-row td { background: #E5EEFF; color: #1E4FB8; font-weight: 700; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 10px; border-bottom: 0; }
   .totals { margin-top: 18px; margin-left: auto; width: 55%; }
-  .totals td { padding: 6px 10px; border: none; }
-  .totals tr.divider td { border-top: 2px solid #0f172a; padding-top: 10px; }
-  .totals .label { color: #475569; }
+  .totals td { padding: 5px 10px; border: none; }
+  .totals tr.divider td { border-top: 2px solid #0A1626; padding-top: 10px; }
+  .totals .label { color: #56667D; }
   .totals .value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-  .totals .grand { font-size: 12.5pt; color: #2563eb; font-weight: 700; }
-  .footer-note { margin-top: 28px; font-size: 9pt; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }
-  .empty { color: #94a3b8; font-style: italic; }
+  .totals .grand { font-size: 12pt; color: #1E6BFF; font-weight: 800; }
+  .totals .label.grand { color: #0A1626; font-weight: 700; }
+  .footer-note { margin-top: 28px; font-size: 8.5pt; color: #56667D; border-top: 1px solid #E2E8F1; padding-top: 10px; }
+  .empty { color: #56667D; font-style: italic; }
 </style>
 </head>
 <body>
@@ -59,7 +67,7 @@
 </div>
 
 <div class="proposal-title">Services Proposal</div>
-<div style="color:#64748b; margin-bottom: 18px;">Prepared on {{ generated_on }}</div>
+<div class="prepared-on">Prepared on {{ generated_on }}</div>
 
 <div class="prospect-card">
   <div class="label">Prepared For</div>

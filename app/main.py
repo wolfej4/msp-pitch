@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import models, schemas
-from .config import DATA_DIR, LOGO_EXTS, find_logo_path
+from .config import DATA_DIR, LOGO_EXTS, find_logo_path, normalize_url
 from .database import Base, engine, get_db
 from .email_sender import EmailError, send_proposal
 from .llm import LLMError, build_system_prompt, list_anthropic_models, list_ollama_models, stream_chat
@@ -52,6 +52,16 @@ _seed_services_if_empty()
 _seed_categories_if_empty()
 
 app = FastAPI(title="MSP Client Pitch", version="1.0.0")
+
+
+@app.middleware("http")
+async def revalidate_frontend(request, call_next):
+    """Make browsers re-check the page and its JS/CSS on every load (cheap 304s via ETag),
+    so a redeploy is picked up instead of running a stale cached app.js."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # ---------- Config ----------
@@ -113,7 +123,7 @@ async def test_llm(payload: schemas.LLMTestRequest):
     """List the models the provider offers, using the (possibly unsaved) form values."""
     try:
         if payload.provider == "ollama":
-            base_url = payload.ollama_base_url.strip() or get_settings().OLLAMA_BASE_URL
+            base_url = normalize_url(payload.ollama_base_url) or get_settings().OLLAMA_BASE_URL
             if not base_url.startswith(("http://", "https://")):
                 raise HTTPException(400, "Ollama URL must start with http:// or https://")
             models = await list_ollama_models(base_url)

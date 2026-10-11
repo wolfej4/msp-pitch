@@ -3,18 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MSP Client Pitch</title>
+<title>SwyfTech Pitch</title>
+<link rel="icon" href="/static/img/logo-mark.png">
+<link rel="preload" href="/static/fonts/plus-jakarta-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
 
 <header>
   <div class="brand">
-    <img id="brandLogo" class="brand-logo hidden" alt="">
-    <div>
-      <div class="brand-name" id="brandName">MSP Pitch</div>
-      <div class="brand-tag" id="brandTag">Managed IT Services</div>
-    </div>
+    <img id="brandLogo" class="brand-logo" src="/static/img/logo-mark.png" alt="">
+    <span><span id="brandName">SwyfTech</span> <b>Pitch</b></span>
   </div>
   <nav>
     <button class="nav-btn active" data-view="prospects">Prospects</button>
@@ -105,6 +104,7 @@
     <div class="toolbar">
       <h1>Settings</h1>
       <div class="toolbar-right">
+        <span class="test-result" id="settingsStatus" role="status"></span>
         <button id="btnResetSettings">Reset to environment defaults</button>
         <button class="primary" id="btnSaveSettings">Save</button>
       </div>
